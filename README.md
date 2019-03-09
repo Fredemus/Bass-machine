@@ -9,5 +9,5 @@ Part goals needed:
 * Note on/off ✓
 * wavetable pos ✓
 * Let max wavetable pos change dynamically with reader.duration
-* Resample function to change pitch
+* Resample function to change pitch (https://ccrma.stanford.edu/~jos/resample/)
 
