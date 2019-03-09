@@ -10,4 +10,5 @@ Part goals needed:
 * wavetable pos ✓
 * Let max wavetable pos change dynamically with reader.duration
 * Resample function to change pitch (https://ccrma.stanford.edu/~jos/resample/)
+* FIR Filter for oversampling (2x oversampling should be fine)
 
