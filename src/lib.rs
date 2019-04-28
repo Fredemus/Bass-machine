@@ -1,206 +1,192 @@
-/*
 
-    TODO:
-    violent jumps (e.g. from 1 to -1 in a square) causes the interpolation to make enormous overshoots at the value. Saw a sample at 804 lol
-    
-    
-
-
-*/
-
-//vst stuff
- #[macro_use] extern crate vst;
-use vst::api::{Events, Supported};
-use vst::buffer::AudioBuffer;
-use vst::event::Event;
-use vst::plugin::{CanDo, Info, Plugin, Category};  
-
-extern crate hound;
-
-// impl FirFilter
-// {
-//     //needs a calc_coefficients to put cutoff at the right place.
-// }
-
-//include interpolation module:
-mod interp;
-
-struct WaveTable
+#[allow(dead_code)]
+pub struct Interp
 {
-    //wave_buffer : Vec<f32>,
-    //pitched_buffer: Vec<f32>,
-    //time_vec : Vec<f32>,
-    //file : File,
-    it : usize,
-    pos : usize,
-    //for midi handling
-    note: Option<u8>,
-    note_duration: f64,
-    sample_rate: f32,
-    interpolator : interp::Interp, 
-    //interpolator : interp::Interp,
-    wt_len : usize,
+
+    pub(crate) source_y : Vec<f32>,
+    pub(crate) waveforms : Vec<Vec<f32>>,
+    wave_number : usize,
+    wave_len : usize,
+    pub(crate) len : usize,
+    pub(crate) times_oversampled : usize,
+    pub(crate) new_len : usize,
+    //coeffs : Vec<Vec<f32>>, //hopefully this can make 2 vectors of f32
+    c0: Vec<f32>,
+    c1: Vec<f32>,
+    c2: Vec<f32>,
+    c3: Vec<f32>,
+    pub(crate) interpolated: Vec<f32>,
+    upsample_fir : Vec<f32>,
 }
-
-impl WaveTable
+#[allow(dead_code)]
+impl Interp
 {
-    fn find_ratio(&self, note : u8) -> f32 {
-        let standard = 21.827; //default wavetable pitch
-        let pn = 440f32 * (2f32.powf(1./12.)).powi(note as i32 - 69);
-        //return ratio between desired pitch and standard 
-        standard / pn
-    }
-
-    fn process_midi_event(&mut self, data: [u8; 3]) {
-        match data[0] {
-            128 => self.note_off(data[1]),
-            144 => self.note_on(data[1]),
-            _ => (),
+    pub(crate) fn oversample(&mut self, ratio: usize){
+        self.times_oversampled = ratio;
+        self.len = self.source_y.len();
+        let mut temp = vec![0.];
+        temp.resize(self.len * ratio, 0.);
+        for i in 0..(self.len * ratio) {
+            if i % 2 == 0 {
+                temp[i] = self.source_y[i/2];
+            }
+            else {
+                temp[i] = 0.;
+            }
         }
-        //change pitched_buffer here?
-    }
-    fn note_on(&mut self, note: u8) {
-        self.note_duration = 0.0;
-        self.note = Some(note);
-        //self.interpolator.cubic_interpolation(self.find_ratio(note))
-        self.interpolator.cubic_interpolation(self.find_ratio(note))
-    }
-    fn note_off(&mut self, note: u8) {
-        if self.note == Some(note) {
-            self.note = None
-        }
-    }
-}
-
-impl Default for WaveTable
-{
-    fn default() -> WaveTable {
-
-        let mut a = WaveTable {
-            //wave_buffer : vec![0.],
-            //pitched_buffer: vec![0.],
-            it : 0,
-            pos : 1,
-            note_duration: 0.0,
-            note: None,
-            sample_rate: 44100.,
-            interpolator : Default::default(),
-            wt_len : 7,
-        };
-        let mut reader = hound::WavReader::open(r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav").unwrap();
-        a.interpolator.source_y = reader.samples().collect::<Result<Vec<_>,_>>().unwrap();
-        a.interpolator.calc_coefficients();
+        //self.len = self.source_y.len();
+        //resize source y to fit the new length
+        self.source_y.resize(self.len * ratio, 0.); 
+        self.len = self.source_y.len();
+        //convolve zero-stuffed vector with coefficients (sinc) of a fir, to remove mirror images above new_Fs/4 
+        //upsample_fir could be turned into a polyphase implementation, to halve number of clock cycles needed
+        self.source_y = self.convolve(&self.upsample_fir, temp);
         
-        //a.pitched_buffer = a.wave_buffer.iter().step_by(2).clone();/*collect::<Vec<f32>>();*/
-        //a.pitched_buffer = reader.samples().step_by(2).collect::<Result<Vec<_>,_>>().unwrap();
-
-        return a;
     }
-}
 
-impl Plugin for WaveTable
-{
-    fn set_sample_rate(&mut self, rate: f32) {
-        self.sample_rate = rate;
+    pub(crate) fn slice(&mut self) {
+        self.len = self.source_y.len();
+        self.wave_len = 2048;
+        for i in 0..self.wave_number {
+            for j in 0..self.wave_len {
+                self.waveforms[i][j] = self.source_y[j + self.wave_len * i];
+
+            }
+        }
     }
-    fn get_info(&self) -> Info 
+    //check for off-by-ones at some point. self.len should be fine instead of len_x
+    pub(crate) fn calc_coefficients(&mut self) {
+        self.len = self.source_y.len();
+        let len_x = self.len - 1;
+        /*
+        // 4-point, 3rd-order Hermite (x-form)
+        float c0 = y[0];
+        float c1 = 1/2.0*(y[1]-y[-1]);
+        float c2 = y[-1] - 5/2.0*y[0] + 2*y[1] - 1/2.0*y[2];
+        float c3 = 1/2.0*(y[2]-y[-1]) + 3/2.0*(y[0]-y[1]);
+        return ((c3*x+c2)*x+c1)*x+c0;
+        */
+        self.c0.resize(self.len, 0.);
+        self.c1.resize(self.len, 0.);
+        self.c2.resize(self.len, 0.);
+        self.c3.resize(self.len, 0.);
+
+
+        //this could easily be optimized away, but oh well
+        for i in 0..len_x {
+                self.c0[i] = self.source_y[i];
+            }
+        //instead of len_x it should be 0+cyclelength. doesn't seem to be a big problem
+        self.c1[0] =  1./2.0*(self.source_y[0+1] - self.source_y[len_x]);
+        self.c2[0] =  self.source_y[len_x] - 5./2.0*self.source_y[0] + 2.*self.source_y[0+1] - 1.0/2.0*self.source_y[0+2];
+        self.c3[0] =  1./2.0*(self.source_y[0+2]-self.source_y[len_x]) + 3.0/2.0*(self.source_y[0+0]-self.source_y[0+1]);
+        for i in 1..len_x {
+                self.c1[i] =  1./2.0*(self.source_y[i+1] -self.source_y[i-1]);
+            }
+        for i in 1..len_x-1 {
+                self.c2[i] =  self.source_y[i-1] - 5./2.0*self.source_y[i] + 2.*self.source_y[i+1] - 1.0/2.0*self.source_y[i+2];
+            }
+        for i in 1..len_x-1 {
+                self.c3[i] =  1./2.0*(self.source_y[i+2]-self.source_y[i-1]) + 3.0/2.0*(self.source_y[i+0]-self.source_y[i+1]);
+            }
+        //instead of 0 it should be len_x-cyclelength.
+        self.c2[len_x] =  self.source_y[len_x-1] - 5./2.0*self.source_y[len_x] + 2.*self.source_y[0] - 1.0/2.0*self.source_y[1];
+        self.c3[len_x] =  1./2.0*(self.source_y[1]-self.source_y[len_x-1]) + 3.0/2.0*(self.source_y[len_x+0]-self.source_y[0]);
+    }
+
+    pub(crate) fn interpolation(&mut self,ratio: f32 ) {
+        let mut temp : f32;
+        let mut it : usize;
+        //find et x-array ud fra hvor mange samples der skal til for at nå den ratio
+        self.new_len = ((self.len as f32) * ratio).round() as usize;
+        //resize the vector to the new size
+        self.interpolated.resize(self.new_len, 0.);
+
+        //this should describe all the necessary values of x, since x always should be between 0 and 1
+        let x = 1. / ratio;
+        for i in 0..(self.new_len -1) {
+            it = ((i as f32) * x) as usize;
+            temp = ((self.c3[it]*x+self.c2[it])*x+self.c1[it])*x+self.c0[it];
+            if temp < 0. {
+                self.interpolated[i] = temp.max(-1.);
+            }
+            else {
+                self.interpolated[i] = temp.max(-1.);
+            }
+        }
+    }
+    pub(crate) fn convolve(&self, p_coeffs : &Vec<f32>, p_in : Vec<f32>) -> Vec<f32>
     {
-        Info  {
-            name: "WaveTable".to_string(),
-            unique_id: 9264,
-            inputs: 0,
-            outputs: 1,
-            category: Category::Synth,
-            parameters: 1,
-            ..Default::default()
-        }
-    }
-    fn process_events(&mut self, events: &Events) {
-        for event in events.events() {
-            match event {
-                Event::Midi(ev) => self.process_midi_event(ev.data),
-                // More events can be handled here.
-                _ => (),
-            }
-        }
-    }
-    fn get_parameter(&self, index: i32) -> f32 {
-    match index {
-        0 => self.pos as f32,
-        _ => 0.0,
-        }
-    }
-    fn set_parameter(&mut self, index: i32, value: f32) {
-        match index {
-            0 => self.pos = ((value * (self.wt_len - 1) as f32).round()) as usize,
-            _ => (),
-        }
-    }
-    fn get_parameter_name(&self, index: i32) -> String {
-        match index {
-            0 => "WT pos".to_string(),
-            //4 => "Wet level".to_string(),
-            _ => "".to_string(),
-        }
-    }
-    fn get_parameter_label(&self, index: i32) -> String {
-        match index {
-            0 => "".to_string(),
-            _ => "".to_string(),
-        }
-    }
-    fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
+       
+        let mut convolved : Vec<f32>;
+        let new_len = p_in.len() + (p_coeffs.len() - 1)/2 ;
+        convolved = vec![0.;p_in.len() + p_coeffs.len()];
+        //convolved.resize(p_in.len() + p_coeffs.len(), 0.);
+        let mut temp = p_in.to_vec();
+        temp.resize(new_len, 0.);
+        //n should be the length of p_in + length of p_coeffs
+        for k in 0..(new_len)  //  position in output
+        {
+            //convolved[k] = 0.;
 
-        // Split out the input and output buffers into two vectors
-        let (_, outputs) = buffer.split();
-
-        // Assume 2 channels
-        // if inputs.len() != 2 || outputs.len() != 2 {
-        //     return;
-        // }
-        // Iterate over inputs as (&f32, &f32)
-        // let (l, r) = inputs.split_at(1);
-        // let stereo_in = l[0].iter().zip(r[0].iter());
-        //  // Iterate over outputs as (&mut f32, &mut f32)
-        // let (mut l, mut r) = outputs.split_at_mut(1);
-        // let stereo_out = l[0].iter_mut().zip(r[0].iter_mut());
-    for output_channel in outputs.into_iter()  {
-            for output_sample in output_channel {
-                if let Some(current_note) = self.note {
-                    
-                    if self.it >= (self.interpolator.new_len/self.wt_len - 1)
-                    {
-                        self.it = 0
-                    }
-                    self.find_ratio(self.note.unwrap());
-                    *output_sample = self.interpolator.interpolated[self.it + ((self.interpolator.new_len/self.wt_len) * self.pos)] ;
-                    //*output_sample = 1.;
-                    self.it += 1;
-                    
-                    // if self.it >= (2048 - 1)
-                    // {
-                    //     self.it = 0
-                    // }
-                    // *output_sample = self.interpolator.interpolated[self.it + ((2048) * self.pos)] ;
-                    // //*output_sample = 1.;
-                    // self.it += 1;
-                    
-                }
-                else {
-                    //behavior of it at note off can be seen as starting phase, and could be made a variable
-                    self.it = 0;
-                    *output_sample = 0.;
+            for i in 0..p_coeffs.len()  //  position in coefficients array
+            {   //this might even take care of group-delay
+                if k >= i //&& k < p_in.len()
+                {
+                    convolved[k] += p_coeffs[i] * temp[k - i];
 
                 }
-               
+
             }
         }
+        //trimming the sample
+        //remove initial group delay by taking number of coefficients - 1 / 2. Only works for number of coefficients
+        for _i in 0..(p_coeffs.len() - 1)/2 {
+            convolved.remove(0); //maybe use drain on an iterator instead?
+        }
+        //trims unnecessary sample at the end
+        convolved.truncate(p_in.len());
+        return convolved;
     }
-    fn can_do(&self, can_do: CanDo) -> Supported {
-        match can_do {
-            CanDo::ReceiveMidiEvent => Supported::Yes,
-            _ => Supported::Maybe,
+}
+impl Default for Interp
+{
+    fn default() -> Interp {
+        Interp {
+            source_y : Vec::with_capacity(2048 * 256),
+            waveforms : Vec::with_capacity(256),
+            len : 0,
+            new_len: 0,
+            wave_number : 0,
+            times_oversampled : 0,
+            wave_len : 2048,
+            //coeffs : Vec<Vec<f32>>, //hopefully this can make 2 vectors of f32
+            //default capacity should take oversampling into account
+            c0: Vec::with_capacity(2048 * 256 * 2),
+            c1: Vec::with_capacity(2048 * 256 * 2),
+            c2: Vec::with_capacity(2048 * 256 * 2),
+            c3: Vec::with_capacity(2048 * 256 * 2),
+            interpolated: Vec::with_capacity(2048 * 256 * 2),
+            upsample_fir: vec!( 0.00012358,0.00033957,0.00037516,8.8899e-06,-0.00044795,-0.00041815,4.9978e-05,0.00020241,
+            -0.0002482,-0.00052463,-3.853e-05,0.00044726,6.4009e-06,-0.00068245,-0.00031123,0.00063276,0.00043639,
+            -0.00073975,-0.00078646,0.00061907,0.0010242,-0.00054354,-0.0013915,0.00026728,0.0016596,3.7334e-05,-0.001964,
+            -0.00052135,0.0021419,0.0010667,-0.0022607,-0.0017539,0.0022023,0.0024895,-0.0019951,-0.0032988,0.0015566,
+            0.0040944,-0.00090139,-0.0048595,-1.8483e-05,0.0055043,0.0011815,-0.0059833,-0.0025974,0.006206,0.004223,
+            -0.0061131,-0.0060255,0.0056225,0.0079314,-0.0046778,-0.0098651,0.0032183,0.01172,-0.0012085,-0.013383,
+            -0.0013785,0.014719,0.0045418,-0.015584,-0.0082643,0.015822,0.0125,-0.01527,-0.017184,0.013752,0.022224,
+            -0.01108,-0.027512,0.0070436,0.032919,-0.0013869,-0.038307,-0.0062311,0.043527,0.016319,-0.04843,
+            -0.029733,0.05287,0.048094,-0.056711,-0.074917,0.059835,0.11947,-0.062141,-0.21603,0.063554,0.6741,1.
+            ,0.6741,0.063554,-0.21603,-0.062141,0.11947,0.059835,-0.074917,-0.056711,0.048094,0.05287,-0.029733,-0.04843,
+            0.016319,0.043527,-0.0062311,-0.038307,-0.0013869,0.032919,0.0070436,-0.027512,-0.01108,0.022224,0.013752,
+            -0.017184,-0.01527,0.0125,0.015822,-0.0082643,-0.015584,0.0045418,0.014719,-0.0013785,-0.013383,-0.0012085,
+            0.01172,0.0032183,-0.0098651,-0.0046778,0.0079314,0.0056225,-0.0060255,-0.0061131,0.004223,0.006206,-0.0025974,
+            -0.0059833,0.0011815,0.0055043,-1.8483e-05,-0.0048595,-0.00090139,0.0040944,0.0015566,-0.0032988,-0.0019951,
+            0.0024895,0.0022023,-0.0017539,-0.0022607,0.0010667,0.0021419,-0.00052135,-0.001964,3.7334e-05,0.0016596,
+            0.00026728,-0.0013915,-0.00054354,0.0010242,0.00061907,-0.00078646,-0.00073975,0.00043639,0.00063276,-0.00031123,
+            -0.00068245,6.4009e-06,0.00044726,-3.853e-05,-0.00052463,-0.0002482,0.00020241,4.9978e-05,-0.00041815,-0.00044795,
+            8.8899e-06,0.00037516,0.00033957,0.00012358),
+
+
         }
     }
 }
-plugin_main!(WaveTable);
