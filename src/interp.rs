@@ -44,9 +44,12 @@ impl Interp
         
     }
 
+    //slices the read .wav into individual waveforms
     pub(crate) fn slice(&mut self) {
         self.len = self.source_y.len();
-        self.wave_len = 2048;
+        self.wave_len = 2048; 
+        self.wave_number = self.len / self.wave_len;
+        self.waveforms.resize(self.wave_number,vec![0.;2048]);
         for i in 0..self.wave_number {
             for j in 0..self.wave_len {
                 self.waveforms[i][j] = self.source_y[j + self.wave_len * i];
