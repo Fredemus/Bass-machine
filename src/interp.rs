@@ -246,7 +246,7 @@ impl Interp
         let z = x - 0.5;
         let z_pos = z.fract();
         for i in 0..(self.new_len) {
-            it = ((i as f32) * z) as usize;
+            it = ((i as f32) * x) as usize;
             temp = ((self.c3[self.pos][it]*z_pos+self.c2[self.pos][it])*z_pos+self.c1[self.pos][it])*z_pos
                    +self.c0[self.pos][it];
             self.interpolated[i] = temp;
