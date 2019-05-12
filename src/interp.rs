@@ -4,7 +4,7 @@ pub struct Interp
 {
     pub(crate) source_y : Vec<f32>,
     pub(crate) waveforms : Vec<Vec<f32>>,
-    wave_number : usize,
+    pub(crate) wave_number : usize,
     pub wave_len : usize,
     pub(crate) len : usize,
     pub(crate) amt_oversample : usize,
@@ -15,11 +15,11 @@ pub struct Interp
     pub it : usize,
     pub pos : usize,
     pub(crate) upsample_fir : Vec<f32>,
+    //mips : Vec<Vec<Vec<f32>>>,
 }
 #[allow(dead_code)]
 impl Interp
 {
-    //returns the next sample to be played
     pub fn step_one(& mut self) -> f32 {
         if self.it >= ((self.new_len - 1 ) / self.amt_oversample )
         {
@@ -34,7 +34,7 @@ impl Interp
         //}
         output
     }
-    //oversamples the wavetable by the ratio
+
     pub(crate) fn oversample(&mut self, ratio: usize){
         self.amt_oversample = ratio;
         //resize slices to fit the new length
@@ -74,8 +74,8 @@ impl Interp
             }
         }
     }
-    //finds the coefficients necessary for Hermite interpolation
-    pub(crate) fn calc_coefficients(&mut self) {
+    //check for off-by-ones at some point. self.len should be fine instead of len_x
+    pub(crate) fn hermite_coeffs(&mut self) {
         self.len = self.source_y.len();
         let new_wave_len = self.wave_len *self.amt_oversample;
         /*
@@ -96,6 +96,11 @@ impl Interp
                 self.c0[i][j] = self.waveforms[i][j];
             }
         }
+        
+        //instead of len_x it should be 0+cyclelength. doesn't seem to be a big problem
+        //self.c1[0] =  1./2.0*(self.source_y[0+1] - self.source_y[len_x]);
+        //self.c2[0] =  self.source_y[len_x] - 5./2.0*self.source_y[0] + 2.*self.source_y[0+1] - 1.0/2.0*self.source_y[0+2];
+        //self.c3[0] =  1./2.0*(self.source_y[0+2]-self.source_y[len_x]) + 3.0/2.0*(self.source_y[0+0]-self.source_y[0+1]);
         for i in 0..self.wave_number {
             for j in 1..new_wave_len - 1 {
                 
@@ -143,20 +148,114 @@ impl Interp
         self.interpolated.resize(self.new_len, 0.);
         //this should describe all the necessary values of x, since x always should be between 0 and 1
         let x = 1. / ratio;
+        let x_pos = x.fract();
         for i in 0..(self.new_len -1) {
             it = ((i as f32) * x) as usize;
-            temp = ((self.c3[self.pos][it]*x+self.c2[self.pos][it])*x+self.c1[self.pos][it])*x+self.c0[self.pos][it];
-
+            temp = ((self.c3[self.pos][it]*x_pos+self.c2[self.pos][it])*x_pos+self.c1[self.pos][it])*x_pos+self.c0[self.pos][it];
+            self.interpolated[i] = temp;
             //clipping ameliorates a problem with overshoots from this interpolation algorithm.
-            if temp < 0. {
-                self.interpolated[i] = temp.max(-1.1);
-            }
-            else {
-                self.interpolated[i] = temp.min(1.1);
+            // if temp < 0. {
+            //     self.interpolated[i] = temp.max(-1.1);
+            // }
+            // else {
+            //     self.interpolated[i] = temp.min(1.1);
+            // }
+        }
+        //self.interpolated[0] = self.waveforms[self.pos][0];
+    }
+    pub(crate) fn optimal_coeffs(&mut self) {
+        self.len = self.source_y.len();
+        let new_wave_len = self.wave_len *self.amt_oversample;
+        /*
+        // Optimal 2x (4-point, 3rd-order) (z-form)
+        float z = x - 1/2.0;
+        float even1 = y[1]+y[0], odd1 = y[1]-y[0];
+        float even2 = y[2]+y[-1], odd2 = y[2]-y[-1];
+        float c0 = even1*0.45868970870461956 + even2*0.04131401926395584;
+        float c1 = odd1*0.48068024766578432 + odd2*0.17577925564495955;
+        float c2 = even1*-0.246185007019907091 + even2*0.24614027139700284;
+        float c3 = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+        */ 
+        let mut even1; let mut even2 : f32;
+        let mut odd1 : f32; let mut odd2 : f32;
+        self.c0.resize(self.wave_number,vec![0.;new_wave_len]);
+        self.c1.resize(self.wave_number,vec![0.;new_wave_len]);
+        self.c2.resize(self.wave_number,vec![0.;new_wave_len]);
+        self.c3.resize(self.wave_number,vec![0.;new_wave_len]);
+        //println!("{}", self.waveforms[0][new_wave_len]);
+        for i in 0..self.wave_number {
+            for j in 1..new_wave_len - 2 {
+                even1 = self.waveforms[i][j+1]+self.waveforms[i][j+0];
+                odd1 = self.waveforms[i][j+1]-self.waveforms[i][j+0];
+                even2 = self.waveforms[i][j+2]+self.waveforms[i][j-1];
+                odd2 = self.waveforms[i][j+2]-self.waveforms[i][j-1];
+                self.c0[i][j] = even1*0.45868970870461956 + even2*0.04131401926395584;
+                self.c1[i][j] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
+                self.c2[i][j] = even1*-0.246185007019907091 + even2*0.24614027139700284;
+                self.c3[i][j] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+
             }
         }
-        self.interpolated[0] = self.waveforms[self.pos][0];
+        
+        //makes sure the start of waveforms are handled properly
+        for i in 0..self.wave_number {
+            even1 = self.waveforms[i][0+1]+self.waveforms[i][0+0];
+            odd1 = self.waveforms[i][0+1]-self.waveforms[i][0+0];
+            even2 = self.waveforms[i][0+2]+self.waveforms[i][new_wave_len-1];
+            odd2 = self.waveforms[i][0+2]-self.waveforms[i][new_wave_len-1];
+            self.c0[i][0] = even1*0.45868970870461956 + even2*0.04131401926395584;
+            self.c1[i][0] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
+            self.c2[i][0] = even1*-0.246185007019907091 + even2*0.24614027139700284;
+            self.c3[i][0] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+        }
+        //makes sure the end of waveforms are handled properly
+        for i in 0..self.wave_number {
+            even1 = self.waveforms[i][new_wave_len  - 1]+self.waveforms[i][new_wave_len  - 2];
+            odd1 = self.waveforms[i][new_wave_len  - 1]-self.waveforms[i][new_wave_len  - 2];
+            even2 = self.waveforms[i][0]+self.waveforms[i][new_wave_len  - 3];
+            odd2 = self.waveforms[i][0]-self.waveforms[i][new_wave_len  - 3];
+            self.c0[i][new_wave_len  - 2] = even1*0.45868970870461956 + even2*0.04131401926395584;
+            self.c1[i][new_wave_len  - 2] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
+            self.c2[i][new_wave_len  - 2] = even1*-0.246185007019907091 + even2*0.24614027139700284;
+            self.c3[i][new_wave_len  - 2] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+
+            even1 = self.waveforms[i][0]+self.waveforms[i][new_wave_len  - 1];
+            odd1 = self.waveforms[i][0]-self.waveforms[i][new_wave_len  - 1];
+            even2 = self.waveforms[i][1]+self.waveforms[i][new_wave_len  - 2];
+            odd2 = self.waveforms[i][1]-self.waveforms[i][new_wave_len  - 2];
+            self.c0[i][new_wave_len  - 1] = even1*0.45868970870461956 + even2*0.04131401926395584;
+            self.c1[i][new_wave_len  - 1] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
+            self.c2[i][new_wave_len  - 1] = even1*-0.246185007019907091 + even2*0.24614027139700284;
+            self.c3[i][new_wave_len  - 1] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+        }
+        
     }
+
+    pub(crate) fn optimal_interp(&mut self, ratio: f32) {
+        // Optimal 2x (4-point, 3rd-order) (z-form)
+        // return ((c3*z+c2)*z+c1)*z+c0;
+        let mut temp : f32;
+        let mut it : usize;
+        //find et x-array ud fra hvor mange samples der skal til for at nå den ratio
+        //self.new_len = ((self.len as f32) * ratio).round() as usize;
+        self.new_len = ((self.wave_len as f32) * self.amt_oversample as f32 *ratio).round() as usize;
+        //resize the vector to the new size
+        self.interpolated.resize(self.new_len, 0.);
+        //this should describe all the necessary values of x, since x always should be between 0 and 1
+        let x = 1. / ratio;
+        let z = x - 0.5;
+        let z_pos = z.fract();
+        for i in 0..(self.new_len) {
+            it = ((i as f32) * z) as usize;
+            temp = ((self.c3[self.pos][it]*z_pos+self.c2[self.pos][it])*z_pos+self.c1[self.pos][it])*z_pos
+                   +self.c0[self.pos][it];
+            self.interpolated[i] = temp;
+        }
+
+        //self.interpolated[0] = self.waveforms[self.pos][0];
+    }
+
+
     pub(crate) fn convolve(&self, p_coeffs : &Vec<f32>, p_in : &Vec<f32>) -> Vec<f32>
     {   //possibly more efficient convolution https://stackoverflow.com/questions/8424170/1d-linear-convolution-in-ansi-c-code
         //convolution could be significantly sped up by doing it in the frequency domain. from O(n^2) to O(n*log(n))
@@ -199,7 +298,7 @@ impl Default for Interp
             amt_oversample : 1,
             wave_len : 2048,
             it : 0,
-            pos: 2,
+            pos: 0,
             //coeffs : Vec<Vec<f32>>, //hopefully this can make 2 vectors of f32
             //default capacity should take oversampling into account
             c0: Vec::with_capacity(2048 * 256 * 2),
