@@ -3,12 +3,16 @@
     TODO:
     downsampling. Naive downsampling for now
 
+
+
     Look into half-band filters
 
     https://se.mathworks.com/help/signal/ref/intfilt.html <- fir interpolation source for upsampling
     https://docs.rs/basic_dsp/0.2.0/basic_dsp/
 
 */
+
+
 
 //vst stuff
  #[macro_use] extern crate vst;
@@ -18,6 +22,11 @@ use vst::event::Event;
 use vst::plugin::{CanDo, Info, Plugin, Category};  
 
 extern crate hound;
+
+// impl FirFilter
+// {
+//     //needs a calc_coefficients to put cutoff at the right place.
+// }
 
 //include interpolation module:
 mod interp;
@@ -57,10 +66,10 @@ impl WaveTable
     fn note_on(&mut self, note: u8) {
         self.note_duration = 0.0;
         self.note = Some(note);
-        self.osc1.interpolation(self.find_ratio(note))
+        self.osc1.interpolation(self.find_ratio(note));
+        //self.osc1.interpolated = self.osc1.convolve(&self.osc1.upsample_fir, &self.osc1.interpolated);
     }
     fn note_off(&mut self, note: u8) {
-        
         if self.note == Some(note) {
             self.note = None
         }
@@ -85,8 +94,7 @@ impl Default for WaveTable
         a.osc1.source_y = reader.samples().collect::<Result<Vec<_>,_>>().unwrap();
         a.osc1.slice();
         a.osc1.oversample(2);
-        //need fir filter here
-        a.osc1.calc_coefficients();
+        a.osc1.hermite_coeffs();
         a.wt_len = a.osc1.len / (2048 * a.osc1.amt_oversample);
         
         //a.pitched_buffer = a.wave_buffer.iter().step_by(2).clone();/*collect::<Vec<f32>>();*/
@@ -130,7 +138,7 @@ impl Plugin for WaveTable
     }
     fn set_parameter(&mut self, index: i32, value: f32) {
         match index {
-            0 => self.osc1.pos = ((value * (self.wt_len - 1) as f32).round()) as usize,
+            0 => self.osc1.pos = ((value * (self.osc1.wave_number - 1) as f32).round()) as usize,
             _ => (),
         }
     }
@@ -162,11 +170,21 @@ impl Plugin for WaveTable
     for output_channel in outputs.into_iter()  {
             for output_sample in output_channel {
                 if let Some(_current_note) = self.note {
-                    //the step one method returns the next sample to be played. 
+                    //need oversampling process. Start tucking it away into interp.rs and make it a proper oscillator?
                     *output_sample = self.osc1.step_one();
+                    //}
+
+                    // if self.it >= (2048 - 1)
+                    // {
+                    //     self.it = 0
+                    // }
+                    // *output_sample = self.osc1.interpolated[self.it + ((2048) * self.pos)] ;
+                    // //*output_sample = 1.;
+                    // self.it += 1;
+
                 }
                 else {
-                    //behavior of it at note off can be seen as starting phase, and could be made a variable. Useful for unison
+                    //behavior of it at note off can be seen as starting phase, and could be made a variable
                     self.osc1.it = 0;
                     *output_sample = 0.;
 
