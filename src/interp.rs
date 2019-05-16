@@ -25,11 +25,7 @@ impl Interp
         {
             self.it = 0
         }
-        //naive downsampling for now, implement a (halfband?) filter here
-        //if self.it % 2 == 0 {
-            let output = self.interpolated[self.it * self.amt_oversample /*+ 
-            (((self.new_len)/self.wave_number)  * self.pos)*/] ;
-            //*output_sample = 1.;
+            let output = self.interpolated[self.it * self.amt_oversample];
             self.it += 1;
         //}
         output
