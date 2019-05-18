@@ -3,15 +3,12 @@
     TODO:
     downsampling. Naive downsampling for now
 
-
-
     Look into half-band filters
 
+    https://se.mathworks.com/help/signal/ref/intfilt.html <- fir interpolation source for upsampling
     https://docs.rs/basic_dsp/0.2.0/basic_dsp/
 
 */
-
-
 
 //vst stuff
  #[macro_use] extern crate vst;
@@ -20,47 +17,50 @@ use vst::buffer::AudioBuffer;
 use vst::event::Event;
 use vst::plugin::{CanDo, Info, Plugin, Category};  
 
-//handles .wav files
+//used for handling .wav files
 extern crate hound;
 
-
-//include our interpolation module:
+//include interpolation module:
 mod interp;
 
 struct WaveTable
 {
-    //for midi handling Option means note can be Some (a note is being played) or None.
     note: Option<u8>,
     note_duration: f64,
     sample_rate: f32,
-    //osc1 is our interpolation oscillator
+    //the oscillator. More can easily be added
     osc1 : interp::Interp, 
     wt_len : usize,
+    ratio : f32,
 }
 
 impl WaveTable
 {
     fn find_ratio(&self, note : u8) -> f32 {
-        let standard = 21.53320312; //default wavetable pitch
+
+        let standard = /*21.827*/ 21.53320312; //default wavetable pitch
         let pn = 440f32 * (2f32.powf(1./12.)).powi(note as i32 - 69);
         //return ratio between desired pitch and standard 
+        let diff = note -17;
+        let mip_level = diff /12;
+
+
         standard / pn
     }
-
     fn process_midi_event(&mut self, data: [u8; 3]) {
         match data[0] {
             128 => self.note_off(data[1]),
             144 => self.note_on(data[1]),
             _ => (),
         }
+        //change pitched_buffer here?
     }
     fn note_on(&mut self, note: u8) {
         self.note_duration = 0.0;
         self.note = Some(note);
-        //resamples the upsampled waveform to the correct note
-        self.osc1.interpolation(self.find_ratio(note));
-        //filters it at fs/4, before downsampling to original sample rate
-        self.osc1.interpolated = self.osc1.convolve(&self.osc1.upsample_fir, &self.osc1.interpolated);
+        self.ratio = self.find_ratio(note);
+        self.osc1.prep_buffer(self.ratio);
+        //self.osc1.interpolated = self.osc1.static_convolve(&self.osc1.upsample_fir, &self.osc1.interpolated);
     }
     fn note_off(&mut self, note: u8) {
         if self.note == Some(note) {
@@ -68,29 +68,28 @@ impl WaveTable
         }
     }
 }
-//Rusts equivalent of a constructor
+
 impl Default for WaveTable
 {
     fn default() -> WaveTable {
-        //creates the struct with default values.
         let mut a = WaveTable {
             note_duration: 0.0,
             note: None,
             sample_rate: 44100.,
             osc1 : Default::default(),
             wt_len : 7,
+            ratio : 0.,
         };
         let mut reader = hound::WavReader::open(r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav").unwrap();
         a.osc1.source_y = reader.samples().collect::<Result<Vec<_>,_>>().unwrap();
         a.osc1.slice();
         a.osc1.oversample(2);
-        a.osc1.hermite_coeffs();
+        a.osc1.optimal_coeffs();
         a.wt_len = a.osc1.len / (2048 * a.osc1.amt_oversample);
         return a;
     }
 }
 
-//functions to handle vst functionality
 impl Plugin for WaveTable
 {
     fn set_sample_rate(&mut self, rate: f32) {
@@ -142,8 +141,8 @@ impl Plugin for WaveTable
             _ => "".to_string(),
         }
     }
-    //this is where the actual DSP process happens
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
+
         // Split out the input and output buffers into two vectors
         let (_, outputs) = buffer.split();
 
@@ -157,19 +156,18 @@ impl Plugin for WaveTable
     for output_channel in outputs.into_iter()  {
             for output_sample in output_channel {
                 if let Some(_current_note) = self.note {
-                    *output_sample = self.osc1.step_one();
+                    //outputs the next sample to be played.
+                    *output_sample = self.osc1.step_one(self.ratio);
                 }
                 else {
                     //behavior of it at note off can be seen as starting phase, and could be made a variable
-                    self.osc1.it = 0;
+                    self.osc1.it_unrounded = 0.;
                     *output_sample = 0.;
 
                 }
-               
             }
         }
     }
-    //tells the vst what's supported
     fn can_do(&self, can_do: CanDo) -> Supported {
         match can_do {
             CanDo::ReceiveMidiEvent => Supported::Yes,
@@ -178,3 +176,5 @@ impl Plugin for WaveTable
     }
 }
 plugin_main!(WaveTable);
+
+
