@@ -1,5 +1,12 @@
-
+use std::f32;
+use std::collections::VecDeque;
 #[allow(dead_code)]
+
+/*
+        Big alias problem now. SNR at 1 kHz is about -30 dB
+*/
+
+
 pub struct Interp
 {
     pub(crate) source_y : Vec<f32>,
@@ -11,8 +18,10 @@ pub struct Interp
     pub(crate) new_len : usize,
     //coeffs : Vec<Vec<f32>>, //hopefully this can make 2 vectors of f32
     c0: Vec<Vec<f32>>, c1: Vec<Vec<f32>>, c2: Vec<Vec<f32>>, c3: Vec<Vec<f32>>,
-    pub(crate) interpolated: Vec<f32>,
+    fir_len : usize,
+    pub(crate) interp_buffer: VecDeque<f32>,
     pub it : usize,
+    pub it_unrounded : f32,
     pub pos : usize,
     pub(crate) upsample_fir : Vec<f32>,
     //mips : Vec<Vec<Vec<f32>>>,
@@ -20,16 +29,32 @@ pub struct Interp
 #[allow(dead_code)]
 impl Interp
 {
-    pub fn step_one(& mut self) -> f32 {
-        if self.it >= ((self.new_len - 1 ) / self.amt_oversample )
-        {
-            self.it = 0
+    //fills a buffer we can use for fir filtering. Has to be called every time a midi on message happens
+    //or continually be filled on both note on and note off.
+    pub(crate) fn prep_buffer(&mut self, _ratio: f32) {
+        self.interp_buffer.resize(self.upsample_fir.len() + 1, 0.);
+        for i in 0..self.upsample_fir.len() -1 {
+            self.interp_buffer[i] = 0.;
         }
-            let output = self.interpolated[self.it * self.amt_oversample];
-            self.it += 1;
-        //}
-        output
     }
+    //needs downsampling. We might require more antialiasing
+    pub fn step_one(& mut self, ratio: f32) -> f32 {
+        //first we filter our sample based on our output
+        let mut output = 0.;
+        let unfiltered_new = self.optimal_interp(ratio);
+        //downsampling for loop
+        for _i in 0..self.amt_oversample
+        {
+            output = self.single_convolve(&self.upsample_fir);
+            //removes the sample that just got filtered
+            self.interp_buffer.pop_front();
+            //adds a new unfiltered sample to the end
+            
+            self.interp_buffer.push_back(unfiltered_new);
+        }
+        return output;
+    }
+
 
     pub(crate) fn oversample(&mut self, ratio: usize){
         self.amt_oversample = ratio;
@@ -51,10 +76,10 @@ impl Interp
             }
             self.waveforms[i] = temp.to_vec();
         }
-        //convolve zero-stuffed vector with coefficients (sinc) of a fir, to remove mirror images above new_Fs/4 
+        //static_convolve zero-stuffed vector with coefficients (sinc) of a fir, to remove mirror images above new_Fs/4 
         //upsample_fir could be turned into a polyphase implementation, to halve number of clock cycles needed
         for i in 0..self.wave_number {
-            self.waveforms[i] = self.convolve(&self.upsample_fir, &self.waveforms[i]);
+            self.waveforms[i] = self.static_convolve(&self.upsample_fir, &self.waveforms[i]);
         }
     }
     //slices the read .wav into individual waveforms
@@ -92,7 +117,6 @@ impl Interp
                 self.c0[i][j] = self.waveforms[i][j];
             }
         }
-        
         //instead of len_x it should be 0+cyclelength. doesn't seem to be a big problem
         //self.c1[0] =  1./2.0*(self.source_y[0+1] - self.source_y[len_x]);
         //self.c2[0] =  self.source_y[len_x] - 5./2.0*self.source_y[0] + 2.*self.source_y[0+1] - 1.0/2.0*self.source_y[0+2];
@@ -127,10 +151,7 @@ impl Interp
             self.c3[i][new_wave_len - 1] =  1./2.0*(self.waveforms[i][0+1]-self.waveforms[i][new_wave_len - 2]) + 3.0/2.0*(self.waveforms[i][new_wave_len - 1]-self.waveforms[i][0]);
             self.c3[i][new_wave_len - 2] =  1./2.0*(self.waveforms[i][0]-self.waveforms[i][new_wave_len - 3]) + 3.0/2.0*(self.waveforms[i][new_wave_len - 2]-self.waveforms[i][new_wave_len - 1]);
         }
-        // for i in 1..len_x-1 {
-        //         self.c3[i] =  1./2.0*(self.source_y[i+2]-self.source_y[i-1]) + 3.0/2.0*(self.source_y[i+0]-self.source_y[i+1]);
-        //     }
-      
+        
     }
     //consider fixing some discontinuities by just setting first and last sample to original lol
     //only interpolates one waveform at a time. This means for now that you cant change waveform without changing notes.
@@ -141,23 +162,19 @@ impl Interp
         //self.new_len = ((self.len as f32) * ratio).round() as usize;
         self.new_len = ((self.wave_len as f32) * self.amt_oversample as f32 *ratio).round() as usize;
         //resize the vector to the new size
-        self.interpolated.resize(self.new_len, 0.);
+        self.interp_buffer.resize(self.new_len, 0.);
         //this should describe all the necessary values of x, since x always should be between 0 and 1
         let x = 1. / ratio;
         let x_pos = x.fract();
         for i in 0..(self.new_len -1) {
             it = ((i as f32) * x) as usize;
+            if i >= self.new_len - 5 {
+                println!("{}",it);
+            }
             temp = ((self.c3[self.pos][it]*x_pos+self.c2[self.pos][it])*x_pos+self.c1[self.pos][it])*x_pos+self.c0[self.pos][it];
-            self.interpolated[i] = temp;
-            //clipping ameliorates a problem with overshoots from this interpolation algorithm.
-            // if temp < 0. {
-            //     self.interpolated[i] = temp.max(-1.1);
-            // }
-            // else {
-            //     self.interpolated[i] = temp.min(1.1);
-            // }
+            self.interp_buffer[i] = temp;
+            
         }
-        //self.interpolated[0] = self.waveforms[self.pos][0];
     }
     pub(crate) fn optimal_coeffs(&mut self) {
         self.len = self.source_y.len();
@@ -192,7 +209,6 @@ impl Interp
 
             }
         }
-        
         //makes sure the start of waveforms are handled properly
         for i in 0..self.wave_number {
             even1 = self.waveforms[i][0+1]+self.waveforms[i][0+0];
@@ -226,34 +242,59 @@ impl Interp
         }
         
     }
-
-    pub(crate) fn optimal_interp(&mut self, ratio: f32) {
+    //needs downsampling.
+    //if we calculate some samples ahead and store them in a buffer, FIR filtering might still be viable.
+    pub(crate) fn optimal_interp(&mut self, ratio: f32) -> f32 {
         // Optimal 2x (4-point, 3rd-order) (z-form)
         // return ((c3*z+c2)*z+c1)*z+c0;
-        let mut temp : f32;
-        let mut it : usize;
-        //find et x-array ud fra hvor mange samples der skal til for at nå den ratio
-        //self.new_len = ((self.len as f32) * ratio).round() as usize;
-        self.new_len = ((self.wave_len as f32) * self.amt_oversample as f32 *ratio).round() as usize;
-        //resize the vector to the new size
-        self.interpolated.resize(self.new_len, 0.);
-        //this should describe all the necessary values of x, since x always should be between 0 and 1
-        let x = 1. / ratio;
-        let z = x - 0.5;
-        let z_pos = z.fract();
-        for i in 0..(self.new_len) {
-            it = ((i as f32) * x) as usize;
-            temp = ((self.c3[self.pos][it]*z_pos+self.c2[self.pos][it])*z_pos+self.c1[self.pos][it])*z_pos
-                   +self.c0[self.pos][it];
-            self.interpolated[i] = temp;
+        let temp : f32;
+        let it : usize;
+        let findlen = (self.wave_len * self.amt_oversample) as f32 *ratio;
+        //x is the placement of the sample compared to the last one, or the slope
+        //let x = ((self.wave_len * self.amt_oversample - 1 ) as f32 )/(findlen -1.);
+        let x = ((self.wave_len * self.amt_oversample  ) as f32 )/(findlen);
+        self.new_len = findlen as usize;
+        //let z = x - 0.5;
+        let z_pos; //= z.fract();
+        it = self.it_unrounded.floor() as usize;
+        //should z_pos have a -0.5?
+        z_pos = self.it_unrounded.fract();
+        temp = ((self.c3[self.pos][it]*z_pos+self.c2[self.pos][it])*z_pos+self.c1[self.pos][it])*z_pos
+                +self.c0[self.pos][it];
+        //self.interpolated[i] = temp;
+        self.it_unrounded += x;
+        if self.it_unrounded > ((self.wave_len - 1) * self.amt_oversample) as f32{
+            //loop back around zero.
+            self.it_unrounded -= ((self.wave_len - 1) * self.amt_oversample) as f32;
         }
+        return temp;
 
-        //self.interpolated[0] = self.waveforms[self.pos][0];
+    }
+    //this is supposed to pick up after static_convolve is done. But how?
+    pub(crate) fn single_convolve(&self, p_coeffs : &Vec<f32>) -> f32 {
+        let mut convolved : f32;
+        convolved = 0.;
+        //convolved.resize(p_in.len() + p_coeffs.len(), 0.);
+        //let mut temp = self.interp_buffer.to_vec();
+        //temp.resize(new_len, 0.);
+        //n should be the length of p_in + length of p_coeffs
+        //this k value should skip the group delay?
+        let k = p_coeffs.len();
+        {
+            for i in 0..p_coeffs.len()  //  position in coefficients array
+            {   
+                if k >= i 
+                {
+                    //println!("{}", k-i);
+                    convolved += p_coeffs[i] * self.interp_buffer[k - i];
+                }
+            }
+        }
+        return convolved;
     }
 
-
-    pub(crate) fn convolve(&self, p_coeffs : &Vec<f32>, p_in : &Vec<f32>) -> Vec<f32>
-    {   //possibly more efficient convolution https://stackoverflow.com/questions/8424170/1d-linear-convolution-in-ansi-c-code
+    pub(crate) fn static_convolve(&self, p_coeffs : &Vec<f32>, p_in : &Vec<f32>) -> Vec<f32> {   
+        //possibly more efficient convolution https://stackoverflow.com/questions/8424170/1d-linear-convolution-in-ansi-c-code
         //convolution could be significantly sped up by doing it in the frequency domain. from O(n^2) to O(n*log(n))
         let mut convolved : Vec<f32>;
         let new_len = p_in.len() + (p_coeffs.len() - 1)/2 ;
@@ -294,32 +335,35 @@ impl Default for Interp
             amt_oversample : 1,
             wave_len : 2048,
             it : 0,
+            it_unrounded : 0.,
             pos: 0,
+            fir_len: 179,
             //coeffs : Vec<Vec<f32>>, //hopefully this can make 2 vectors of f32
             //default capacity should take oversampling into account
             c0: Vec::with_capacity(2048 * 256 * 2),
             c1: Vec::with_capacity(2048 * 256 * 2),
             c2: Vec::with_capacity(2048 * 256 * 2),
             c3: Vec::with_capacity(2048 * 256 * 2),
-            interpolated: Vec::with_capacity(2048 * 256 * 2),
-            upsample_fir: vec!( 0.00012358,0.00033957,0.00037516,8.8899e-06,-0.00044795,-0.00041815,4.9978e-05,0.00020241,
-            -0.0002482,-0.00052463,-3.853e-05,0.00044726,6.4009e-06,-0.00068245,-0.00031123,0.00063276,0.00043639,
-            -0.00073975,-0.00078646,0.00061907,0.0010242,-0.00054354,-0.0013915,0.00026728,0.0016596,3.7334e-05,-0.001964,
-            -0.00052135,0.0021419,0.0010667,-0.0022607,-0.0017539,0.0022023,0.0024895,-0.0019951,-0.0032988,0.0015566,
-            0.0040944,-0.00090139,-0.0048595,-1.8483e-05,0.0055043,0.0011815,-0.0059833,-0.0025974,0.006206,0.004223,
-            -0.0061131,-0.0060255,0.0056225,0.0079314,-0.0046778,-0.0098651,0.0032183,0.01172,-0.0012085,-0.013383,
-            -0.0013785,0.014719,0.0045418,-0.015584,-0.0082643,0.015822,0.0125,-0.01527,-0.017184,0.013752,0.022224,
-            -0.01108,-0.027512,0.0070436,0.032919,-0.0013869,-0.038307,-0.0062311,0.043527,0.016319,-0.04843,
-            -0.029733,0.05287,0.048094,-0.056711,-0.074917,0.059835,0.11947,-0.062141,-0.21603,0.063554,0.6741,1.
-            ,0.6741,0.063554,-0.21603,-0.062141,0.11947,0.059835,-0.074917,-0.056711,0.048094,0.05287,-0.029733,-0.04843,
-            0.016319,0.043527,-0.0062311,-0.038307,-0.0013869,0.032919,0.0070436,-0.027512,-0.01108,0.022224,0.013752,
-            -0.017184,-0.01527,0.0125,0.015822,-0.0082643,-0.015584,0.0045418,0.014719,-0.0013785,-0.013383,-0.0012085,
-            0.01172,0.0032183,-0.0098651,-0.0046778,0.0079314,0.0056225,-0.0060255,-0.0061131,0.004223,0.006206,-0.0025974,
-            -0.0059833,0.0011815,0.0055043,-1.8483e-05,-0.0048595,-0.00090139,0.0040944,0.0015566,-0.0032988,-0.0019951,
-            0.0024895,0.0022023,-0.0017539,-0.0022607,0.0010667,0.0021419,-0.00052135,-0.001964,3.7334e-05,0.0016596,
-            0.00026728,-0.0013915,-0.00054354,0.0010242,0.00061907,-0.00078646,-0.00073975,0.00043639,0.00063276,-0.00031123,
-            -0.00068245,6.4009e-06,0.00044726,-3.853e-05,-0.00052463,-0.0002482,0.00020241,4.9978e-05,-0.00041815,-0.00044795,
-            8.8899e-06,0.00037516,0.00033957,0.00012358),
+            interp_buffer: VecDeque::with_capacity(180),
+            
+            upsample_fir: vec!( 5.807e-05,0.00015957,0.00017629,4.1774e-06,-0.00021049,-0.0001965,2.3485e-05,9.5114e-05,
+            -0.00011663,-0.00024653,-1.8106e-05,0.00021017,3.0079e-06,-0.00032069,-0.00014625,0.00029734,0.00020506,
+            -0.00034762,-0.00036956,0.00029091,0.0004813,-0.00025542,-0.00065389,0.0001256,0.00077988,1.7544e-05,
+            -0.0009229,-0.00024499,0.0010065,0.00050125,-0.0010623,-0.00082416,0.0010349,0.0011698,-0.00093752,-0.0015501,
+            0.00073146,0.001924,-0.00042358,-0.0022835,-8.6855e-06,0.0025865,0.00055521,-0.0028116,-0.0012206,0.0029163,
+            0.0019844,-0.0028726,-0.0028315,0.0026421,0.003727,-0.0021982,-0.0046357,0.0015123,0.0055074,-0.00056789,-0.0062889,
+            -0.00064776,0.0069164,0.0021342,-0.0073232,-0.0038835,0.0074351,0.005874,-0.0071756,-0.0080748,0.0064621,0.010443,
+            -0.0052066,-0.012928,0.0033099,0.015469,-0.00065173,-0.018001,-0.0029281,0.020454,0.0076684,-0.022758,-0.013972,
+            0.024844,0.0226,-0.026649,-0.035204,0.028117,0.056141,-0.029201,-0.10152,0.029865,0.31677,0.46991,0.31677,0.029865,
+            -0.10152,-0.029201,0.056141,0.028117,-0.035204,-0.026649,0.0226,0.024844,-0.013972,-0.022758,0.0076684,0.020454,
+            -0.0029281,-0.018001,-0.00065173,0.015469,0.0033099,-0.012928,-0.0052066,0.010443,0.0064621,-0.0080748,-0.0071756,
+            0.005874,0.0074351,-0.0038835,-0.0073232,0.0021342,0.0069164,-0.00064776,-0.0062889,-0.00056789,0.0055074,0.0015123,
+            -0.0046357,-0.0021982,0.003727,0.0026421,-0.0028315,-0.0028726,0.0019844,0.0029163,-0.0012206,-0.0028116,0.00055521,
+            0.0025865,-8.6855e-06,-0.0022835,-0.00042358,0.001924,0.00073146,-0.0015501,-0.00093752,0.0011698,0.0010349,
+            -0.00082416,-0.0010623,0.00050125,0.0010065,-0.00024499,-0.0009229,1.7544e-05,0.00077988,0.0001256,-0.00065389,
+            -0.00025542,0.0004813,0.00029091,-0.00036956,-0.00034762,0.00020506,0.00029734,-0.00014625,-0.00032069,3.0079e-06,
+            0.00021017,-1.8106e-05,-0.00024653,-0.00011663,9.5114e-05,2.3485e-05,-0.0001965,-0.00021049,4.1774e-06,0.00017629,
+            0.00015957,5.807e-05),
         }
     }
 }
