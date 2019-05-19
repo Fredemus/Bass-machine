@@ -1,9 +1,12 @@
 /*
 
     TODO:
-    downsampling. Naive downsampling for now
+    Polyphony. 
+    Improve SNR.
 
-    Look into half-band filters
+    Licensing. Look into MIT and copyleft
+
+    Look into half-band filters for more efficient downsampling.
 
     https://se.mathworks.com/help/signal/ref/intfilt.html <- fir interpolation source for upsampling
     https://docs.rs/basic_dsp/0.2.0/basic_dsp/
@@ -36,14 +39,14 @@ struct WaveTable
 
 impl WaveTable
 {
-    fn find_ratio(&self, note : u8) -> f32 {
+    fn find_ratio(& mut self, note : u8) -> f32 {
 
         let standard = /*21.827*/ 21.53320312; //default wavetable pitch
         let pn = 440f32 * (2f32.powf(1./12.)).powi(note as i32 - 69);
         //return ratio between desired pitch and standard 
         let diff = note -17;
-        let mip_level = diff /12;
-
+        self.osc1.current_mip = diff as usize /12;
+        
 
         standard / pn
     }
@@ -84,6 +87,7 @@ impl Default for WaveTable
         a.osc1.source_y = reader.samples().collect::<Result<Vec<_>,_>>().unwrap();
         a.osc1.slice();
         a.osc1.oversample(2);
+        a.osc1.mip_map();
         a.osc1.optimal_coeffs();
         a.wt_len = a.osc1.len / (2048 * a.osc1.amt_oversample);
         return a;
