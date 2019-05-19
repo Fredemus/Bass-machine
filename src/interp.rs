@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 #[allow(dead_code)]
 
 /*
-        Big alias problem now. SNR at 1 kHz is about -30 dB
+        Slight alias problem. SNR at 1 kHz is about -80 dB. Not sure why it isn't better
 */
 
 
@@ -16,15 +16,19 @@ pub struct Interp
     pub(crate) len : usize,
     pub(crate) amt_oversample : usize,
     pub(crate) new_len : usize,
-    //coeffs : Vec<Vec<f32>>, //hopefully this can make 2 vectors of f32
-    c0: Vec<Vec<f32>>, c1: Vec<Vec<f32>>, c2: Vec<Vec<f32>>, c3: Vec<Vec<f32>>,
+    
+    c0: Vec<Vec<Vec<f32>>>, c1: Vec<Vec<Vec<f32>>>, c2: Vec<Vec<Vec<f32>>>, c3: Vec<Vec<Vec<f32>>>,
     fir_len : usize,
+    //interp_buffer gives room for filtering continuous output from oscillator. 
     pub(crate) interp_buffer: VecDeque<f32>,
     pub it : usize,
     pub it_unrounded : f32,
     pub pos : usize,
     pub(crate) upsample_fir : Vec<f32>,
-    //mips : Vec<Vec<Vec<f32>>>,
+    pub(crate) downsample_fir : Vec<f32>,
+    mips : Vec<Vec<Vec<f32>>>,
+    mip_levels: usize,
+    pub(crate) current_mip : usize,
 }
 #[allow(dead_code)]
 impl Interp
@@ -32,24 +36,25 @@ impl Interp
     //fills a buffer we can use for fir filtering. Has to be called every time a midi on message happens
     //or continually be filled on both note on and note off.
     pub(crate) fn prep_buffer(&mut self, _ratio: f32) {
-        self.interp_buffer.resize(self.upsample_fir.len() + 1, 0.);
-        for i in 0..self.upsample_fir.len() -1 {
+        self.interp_buffer.resize(self.downsample_fir.len() + 1, 0.);
+        for i in 0..self.downsample_fir.len() -1 {
             self.interp_buffer[i] = 0.;
         }
+
     }
-    //needs downsampling. We might require more antialiasing
+    //might require more antialiasing
     pub fn step_one(& mut self, ratio: f32) -> f32 {
         //first we filter our sample based on our output
         let mut output = 0.;
-        let unfiltered_new = self.optimal_interp(ratio);
+        let mut unfiltered_new;
         //downsampling for loop
         for _i in 0..self.amt_oversample
         {
-            output = self.single_convolve(&self.upsample_fir);
+            unfiltered_new = self.optimal_interp(ratio);
+            output = self.single_convolve(&self.downsample_fir);
             //removes the sample that just got filtered
             self.interp_buffer.pop_front();
             //adds a new unfiltered sample to the end
-            
             self.interp_buffer.push_back(unfiltered_new);
         }
         return output;
@@ -82,6 +87,31 @@ impl Interp
             self.waveforms[i] = self.static_convolve(&self.upsample_fir, &self.waveforms[i]);
         }
     }
+    pub(crate) fn downsample_2x(&self, signal : &Vec<f32>) -> Vec<f32> {
+        //first we filter the signal to downsample 2x
+        let temp = self.static_convolve(&self.upsample_fir, &signal);
+        let mut output = vec![0.];
+        output.resize(temp.len()/2, 0.);
+        for j in 0..(signal.len() / 2) {
+                output[j] = temp[j*2];
+        }
+        output
+    }
+    pub(crate) fn mip_map(&mut self) {
+        self.mips.resize(self.mip_levels, vec![vec![0.;self.wave_len];self.mip_levels]);
+        //self.mips.resize(self.wave_number,vec![vec![0.;new_wave_len]; self.mip_levels]);
+        
+        //fill first layer with self.waveforms
+        for i in 0..self.wave_number {
+                self.mips[0][i] = self.waveforms[i].to_vec();
+            }
+        //fills the mip_levels with continually more downsampled vectors
+        for i in 1..self.mip_levels {
+            for j in 0..self.wave_number {
+                self.mips[i][j] = self.downsample_2x(&self.mips[i-1][j]);
+            }
+        }
+    }
     //slices the read .wav into individual waveforms
     pub(crate) fn slice(&mut self) {
         self.len = self.source_y.len();
@@ -97,83 +127,84 @@ impl Interp
     }
     //check for off-by-ones at some point. self.len should be fine instead of len_x
     pub(crate) fn hermite_coeffs(&mut self) {
-        self.len = self.source_y.len();
-        let new_wave_len = self.wave_len *self.amt_oversample;
-        /*
-        // 4-point, 3rd-order Hermite (x-form)
-        float c0 = y[0];
-        float c1 = 1/2.0*(y[1]-y[-1]);
-        float c2 = y[-1] - 5/2.0*y[0] + 2*y[1] - 1/2.0*y[2];
-        float c3 = 1/2.0*(y[2]-y[-1]) + 3/2.0*(y[0]-y[1]);
-        return ((c3*x+c2)*x+c1)*x+c0;
-        */ 
-        self.c0.resize(self.wave_number,vec![0.;new_wave_len]);
-        self.c1.resize(self.wave_number,vec![0.;new_wave_len]);
-        self.c2.resize(self.wave_number,vec![0.;new_wave_len]);
-        self.c3.resize(self.wave_number,vec![0.;new_wave_len]);
-        //this could easily be optimized away, but oh well
-        for i in 0..self.wave_number {
-            for j in 0..new_wave_len {
-                self.c0[i][j] = self.waveforms[i][j];
-            }
-        }
-        //instead of len_x it should be 0+cyclelength. doesn't seem to be a big problem
-        //self.c1[0] =  1./2.0*(self.source_y[0+1] - self.source_y[len_x]);
-        //self.c2[0] =  self.source_y[len_x] - 5./2.0*self.source_y[0] + 2.*self.source_y[0+1] - 1.0/2.0*self.source_y[0+2];
-        //self.c3[0] =  1./2.0*(self.source_y[0+2]-self.source_y[len_x]) + 3.0/2.0*(self.source_y[0+0]-self.source_y[0+1]);
-        for i in 0..self.wave_number {
-            for j in 1..new_wave_len - 1 {
+        // self.len = self.source_y.len();
+        // let new_wave_len = self.wave_len *self.amt_oversample;
+        // /*
+        // // 4-point, 3rd-order Hermite (x-form)
+        // float c0 = y[0];
+        // float c1 = 1/2.0*(y[1]-y[-1]);
+        // float c2 = y[-1] - 5/2.0*y[0] + 2*y[1] - 1/2.0*y[2];
+        // float c3 = 1/2.0*(y[2]-y[-1]) + 3/2.0*(y[0]-y[1]);
+        // return ((c3*x+c2)*x+c1)*x+c0;
+        // */ 
+        // self.c0.resize(self.wave_number,vec![vec![0.;new_wave_len]; 5]);
+        // self.c1.resize(self.wave_number,vec![vec![0.;new_wave_len]; 5]);
+        // self.c2.resize(self.wave_number,vec![vec![0.;new_wave_len]; 5]);
+        // self.c3.resize(self.wave_number,vec![vec![0.;new_wave_len]; 5]);
+        // //this could easily be optimized away, but oh well
+        // for i in 0..self.wave_number {
+        //     for j in 0..new_wave_len {
+        //         self.c0[i][j] = self.waveforms[i][j];
+        //     }
+        // }
+        // //instead of len_x it should be 0+cyclelength. doesn't seem to be a big problem
+        // //self.c1[0] =  1./2.0*(self.source_y[0+1] - self.source_y[len_x]);
+        // //self.c2[0] =  self.source_y[len_x] - 5./2.0*self.source_y[0] + 2.*self.source_y[0+1] - 1.0/2.0*self.source_y[0+2];
+        // //self.c3[0] =  1./2.0*(self.source_y[0+2]-self.source_y[len_x]) + 3.0/2.0*(self.source_y[0+0]-self.source_y[0+1]);
+        // for i in 0..self.wave_number {
+        //     for j in 1..new_wave_len - 1 {
                 
-                self.c1[i][j] =  1./2.0*(self.waveforms[i][j+1] -self.waveforms[i][j-1]);
-            }
-        }
-        for i in 0..self.wave_number {
-            for j in 1..new_wave_len - 2 {
-                self.c2[i][j] =  self.waveforms[i][j-1] - 5./2.0*self.waveforms[i][j] + 2.*self.waveforms[i][j+1] - 1.0/2.0*self.waveforms[i][j+2];
-            }
-        }
-        for i in 0..self.wave_number {
-            for j in 1..new_wave_len - 2 {
-                self.c3[i][j] =  1./2.0*(self.waveforms[i][j+2]-self.waveforms[i][j-1]) + 3.0/2.0*(self.waveforms[i][j+0]-self.waveforms[i][j+1]);
-            }
-        }
-        //makes sure the start of waveforms are handled properly
-        for i in 0..self.wave_number {
-            self.c1[i][0] =  (1.0/2.0)*(self.waveforms[i][0+1] - self.waveforms[i][new_wave_len  - 1]);
-            self.c2[i][0] =  self.waveforms[i][new_wave_len  - 1] - (5./2.0)*self.waveforms[i][0] + 2.*self.waveforms[i][0+1] - (1.0/2.0)*self.waveforms[i][0+2];
-            self.c3[i][0] =  (1.0/2.0)*(self.waveforms[i][0+2]-self.waveforms[i][new_wave_len  - 1]) + (3.0/2.0)*(self.waveforms[i][0]-self.waveforms[i][0+1]);
-        }
-        //makes sure the end of waveforms are handled properly
-        for i in 0..self.wave_number {
-            self.c1[i][new_wave_len  - 1] =  1./2.0*(self.waveforms[i][0] - self.waveforms[i][new_wave_len - 2]);
-            self.c2[i][new_wave_len - 1] =  self.waveforms[i][new_wave_len - 2] - 5./2.0*self.waveforms[i][new_wave_len - 1] + 2.*self.waveforms[i][0] - 1.0/2.0*self.waveforms[i][0+1];
-            self.c2[i][new_wave_len - 2] =  self.waveforms[i][new_wave_len - 3] - 5./2.0*self.waveforms[i][new_wave_len - 2] + 2.*self.waveforms[i][new_wave_len - 1] - 1.0/2.0*self.waveforms[i][0];
-            self.c3[i][new_wave_len - 1] =  1./2.0*(self.waveforms[i][0+1]-self.waveforms[i][new_wave_len - 2]) + 3.0/2.0*(self.waveforms[i][new_wave_len - 1]-self.waveforms[i][0]);
-            self.c3[i][new_wave_len - 2] =  1./2.0*(self.waveforms[i][0]-self.waveforms[i][new_wave_len - 3]) + 3.0/2.0*(self.waveforms[i][new_wave_len - 2]-self.waveforms[i][new_wave_len - 1]);
-        }
+        //         self.c1[i][j] =  1./2.0*(self.waveforms[i][j+1] -self.waveforms[i][j-1]);
+        //     }
+        // }
+        // for i in 0..self.wave_number {
+        //     for j in 1..new_wave_len - 2 {
+        //         self.c2[i][j] =  self.waveforms[i][j-1] - 5./2.0*self.waveforms[i][j] + 2.*self.waveforms[i][j+1] - 1.0/2.0*self.waveforms[i][j+2];
+        //     }
+        // }
+        // for i in 0..self.wave_number {
+        //     for j in 1..new_wave_len - 2 {
+        //         self.c3[i][j] =  1./2.0*(self.waveforms[i][j+2]-self.waveforms[i][j-1]) + 3.0/2.0*(self.waveforms[i][j+0]-self.waveforms[i][j+1]);
+        //     }
+        // }
+        // //makes sure the start of waveforms are handled properly
+        // for i in 0..self.wave_number {
+        //     self.c1[i][0] =  (1.0/2.0)*(self.waveforms[i][0+1] - self.waveforms[i][new_wave_len  - 1]);
+        //     self.c2[i][0] =  self.waveforms[i][new_wave_len  - 1] - (5./2.0)*self.waveforms[i][0] + 2.*self.waveforms[i][0+1] - (1.0/2.0)*self.waveforms[i][0+2];
+        //     self.c3[i][0] =  (1.0/2.0)*(self.waveforms[i][0+2]-self.waveforms[i][new_wave_len  - 1]) + (3.0/2.0)*(self.waveforms[i][0]-self.waveforms[i][0+1]);
+        // }
+        // //makes sure the end of waveforms are handled properly
+        // for i in 0..self.wave_number {
+        //     self.c1[i][new_wave_len  - 1] =  1./2.0*(self.waveforms[i][0] - self.waveforms[i][new_wave_len - 2]);
+        //     self.c2[i][new_wave_len - 1] =  self.waveforms[i][new_wave_len - 2] - 5./2.0*self.waveforms[i][new_wave_len - 1] + 2.*self.waveforms[i][0] - 1.0/2.0*self.waveforms[i][0+1];
+        //     self.c2[i][new_wave_len - 2] =  self.waveforms[i][new_wave_len - 3] - 5./2.0*self.waveforms[i][new_wave_len - 2] + 2.*self.waveforms[i][new_wave_len - 1] - 1.0/2.0*self.waveforms[i][0];
+        //     self.c3[i][new_wave_len - 1] =  1./2.0*(self.waveforms[i][0+1]-self.waveforms[i][new_wave_len - 2]) + 3.0/2.0*(self.waveforms[i][new_wave_len - 1]-self.waveforms[i][0]);
+        //     self.c3[i][new_wave_len - 2] =  1./2.0*(self.waveforms[i][0]-self.waveforms[i][new_wave_len - 3]) + 3.0/2.0*(self.waveforms[i][new_wave_len - 2]-self.waveforms[i][new_wave_len - 1]);
+        // }
         
     }
     //consider fixing some discontinuities by just setting first and last sample to original lol
     //only interpolates one waveform at a time. This means for now that you cant change waveform without changing notes.
     pub(crate) fn interpolation(&mut self,ratio: f32 ) {
+        //find the best mip to do the interpolation from. could be moved elsewhere to avoid calling excessively
+        let mip = (1./ratio).log2().floor() as usize;
+        let downsampled_ratio = 2f32.powi(mip as i32);
         let mut temp : f32;
         let mut it : usize;
-        //find et x-array ud fra hvor mange samples der skal til for at nå den ratio
         //self.new_len = ((self.len as f32) * ratio).round() as usize;
         self.new_len = ((self.wave_len as f32) * self.amt_oversample as f32 *ratio).round() as usize;
         //resize the vector to the new size
         self.interp_buffer.resize(self.new_len, 0.);
         //this should describe all the necessary values of x, since x always should be between 0 and 1
-        let x = 1. / ratio;
+        let x = (1. / ratio)/downsampled_ratio;
         let x_pos = x.fract();
         for i in 0..(self.new_len -1) {
             it = ((i as f32) * x) as usize;
             if i >= self.new_len - 5 {
                 println!("{}",it);
             }
-            temp = ((self.c3[self.pos][it]*x_pos+self.c2[self.pos][it])*x_pos+self.c1[self.pos][it])*x_pos+self.c0[self.pos][it];
+            temp = ((self.c3[mip][self.pos][it]*x_pos+self.c2[mip][self.pos][it])*x_pos+self.c1[mip][self.pos][it])*x_pos+self.c0[mip][self.pos][it];
             self.interp_buffer[i] = temp;
-            
         }
     }
     pub(crate) fn optimal_coeffs(&mut self) {
@@ -191,54 +222,62 @@ impl Interp
         */ 
         let mut even1; let mut even2 : f32;
         let mut odd1 : f32; let mut odd2 : f32;
-        self.c0.resize(self.wave_number,vec![0.;new_wave_len]);
-        self.c1.resize(self.wave_number,vec![0.;new_wave_len]);
-        self.c2.resize(self.wave_number,vec![0.;new_wave_len]);
-        self.c3.resize(self.wave_number,vec![0.;new_wave_len]);
-        //println!("{}", self.waveforms[0][new_wave_len]);
-        for i in 0..self.wave_number {
-            for j in 1..new_wave_len - 2 {
-                even1 = self.waveforms[i][j+1]+self.waveforms[i][j+0];
-                odd1 = self.waveforms[i][j+1]-self.waveforms[i][j+0];
-                even2 = self.waveforms[i][j+2]+self.waveforms[i][j-1];
-                odd2 = self.waveforms[i][j+2]-self.waveforms[i][j-1];
-                self.c0[i][j] = even1*0.45868970870461956 + even2*0.04131401926395584;
-                self.c1[i][j] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
-                self.c2[i][j] = even1*-0.246185007019907091 + even2*0.24614027139700284;
-                self.c3[i][j] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
-
+        self.c0.resize(self.wave_number,vec![vec![0.;new_wave_len]; self.mip_levels]);
+        self.c1.resize(self.wave_number,vec![vec![0.;new_wave_len]; self.mip_levels]);
+        self.c2.resize(self.wave_number,vec![vec![0.;new_wave_len]; self.mip_levels]);
+        self.c3.resize(self.wave_number,vec![vec![0.;new_wave_len]; self.mip_levels]);
+        //let mut n;
+        for n in 0..self.mip_levels {  //n represent mip-map levels
+            for i in 0..self.wave_number {
+                for j in 1..self.mips[n][0].len() - 2 {
+                    even1 = self.mips[n][i][j+1]+self.mips[n][i][j+0];
+                    odd1 = self.mips[n][i][j+1]-self.mips[n][i][j+0];
+                    even2 = self.mips[n][i][j+2]+self.mips[n][i][j-1];
+                    odd2 = self.mips[n][i][j+2]-self.mips[n][i][j-1];
+                    self.c0[n][i][j] = even1*0.45868970870461956 + even2*0.04131401926395584;
+                    self.c1[n][i][j] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
+                    self.c2[n][i][j] = even1*-0.246185007019907091 + even2*0.24614027139700284;
+                    self.c3[n][i][j] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+                }
             }
         }
         //makes sure the start of waveforms are handled properly
-        for i in 0..self.wave_number {
-            even1 = self.waveforms[i][0+1]+self.waveforms[i][0+0];
-            odd1 = self.waveforms[i][0+1]-self.waveforms[i][0+0];
-            even2 = self.waveforms[i][0+2]+self.waveforms[i][new_wave_len-1];
-            odd2 = self.waveforms[i][0+2]-self.waveforms[i][new_wave_len-1];
-            self.c0[i][0] = even1*0.45868970870461956 + even2*0.04131401926395584;
-            self.c1[i][0] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
-            self.c2[i][0] = even1*-0.246185007019907091 + even2*0.24614027139700284;
-            self.c3[i][0] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+        
+        for n in 0..self.mip_levels {
+            let j = self.mips[n][0].len();
+            for i in 0..self.wave_number {
+                even1 = self.mips[n][i][0+1]+self.mips[n][i][0+0];
+                odd1 = self.mips[n][i][0+1]-self.mips[n][i][0+0];
+                even2 = self.mips[n][i][0+2]+self.mips[n][i][j-1];
+                odd2 = self.mips[n][i][0+2]-self.mips[n][i][j-1];
+                self.c0[n][i][0] = even1*0.45868970870461956 + even2*0.04131401926395584;
+                self.c1[n][i][0] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
+                self.c2[n][i][0] = even1*-0.246185007019907091 + even2*0.24614027139700284;
+                self.c3[n][i][0] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+            }
         }
         //makes sure the end of waveforms are handled properly
-        for i in 0..self.wave_number {
-            even1 = self.waveforms[i][new_wave_len  - 1]+self.waveforms[i][new_wave_len  - 2];
-            odd1 = self.waveforms[i][new_wave_len  - 1]-self.waveforms[i][new_wave_len  - 2];
-            even2 = self.waveforms[i][0]+self.waveforms[i][new_wave_len  - 3];
-            odd2 = self.waveforms[i][0]-self.waveforms[i][new_wave_len  - 3];
-            self.c0[i][new_wave_len  - 2] = even1*0.45868970870461956 + even2*0.04131401926395584;
-            self.c1[i][new_wave_len  - 2] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
-            self.c2[i][new_wave_len  - 2] = even1*-0.246185007019907091 + even2*0.24614027139700284;
-            self.c3[i][new_wave_len  - 2] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+        for n in 0..self.mip_levels {
+            let j = self.mips[n][0].len();
+            for i in 0..self.wave_number {
+                even1 = self.mips[n][i][j - 1]+self.mips[n][i][j - 2];
+                odd1 = self.mips[n][i][j - 1]-self.mips[n][i][j - 2];
+                even2 = self.mips[n][i][0]+self.mips[n][i][j - 3];
+                odd2 = self.mips[n][i][0]-self.mips[n][i][j - 3];
+                self.c0[n][i][j - 2] = even1*0.45868970870461956 + even2*0.04131401926395584;
+                self.c1[n][i][j - 2] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
+                self.c2[n][i][j - 2] = even1*-0.246185007019907091 + even2*0.24614027139700284;
+                self.c3[n][i][j - 2] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
 
-            even1 = self.waveforms[i][0]+self.waveforms[i][new_wave_len  - 1];
-            odd1 = self.waveforms[i][0]-self.waveforms[i][new_wave_len  - 1];
-            even2 = self.waveforms[i][1]+self.waveforms[i][new_wave_len  - 2];
-            odd2 = self.waveforms[i][1]-self.waveforms[i][new_wave_len  - 2];
-            self.c0[i][new_wave_len  - 1] = even1*0.45868970870461956 + even2*0.04131401926395584;
-            self.c1[i][new_wave_len  - 1] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
-            self.c2[i][new_wave_len  - 1] = even1*-0.246185007019907091 + even2*0.24614027139700284;
-            self.c3[i][new_wave_len  - 1] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+                even1 = self.mips[n][i][0]+self.mips[n][i][j - 1];
+                odd1 = self.mips[n][i][0]-self.mips[n][i][j - 1];
+                even2 = self.mips[n][i][1]+self.mips[n][i][j - 2];
+                odd2 = self.mips[n][i][1]-self.mips[n][i][j - 2];
+                self.c0[n][i][j - 1] = even1*0.45868970870461956 + even2*0.04131401926395584;
+                self.c1[n][i][j - 1] = odd1*0.48068024766578432 + odd2*0.17577925564495955;
+                self.c2[n][i][j - 1] = even1*-0.246185007019907091 + even2*0.24614027139700284;
+                self.c3[n][i][j - 1] = odd1*-0.36030925263849456 + odd2*0.10174985775982505;
+            }
         }
         
     }
@@ -247,27 +286,33 @@ impl Interp
     pub(crate) fn optimal_interp(&mut self, ratio: f32) -> f32 {
         // Optimal 2x (4-point, 3rd-order) (z-form)
         // return ((c3*z+c2)*z+c1)*z+c0;
+        //find the best mip to do the interpolation from. could be moved elsewhere to avoid calling excessively
+        let mip = self.current_mip; /*(1./ratio).log2().floor() as usize;*/
+        let downsampled_ratio = 2f32.powi(self.current_mip as i32);
         let temp : f32;
         let it : usize;
+        //find the new wavelength in samples
         let findlen = (self.wave_len * self.amt_oversample) as f32 *ratio;
         //x is the placement of the sample compared to the last one, or the slope
         //let x = ((self.wave_len * self.amt_oversample - 1 ) as f32 )/(findlen -1.);
-        let x = ((self.wave_len * self.amt_oversample  ) as f32 )/(findlen);
+        let x = ((self.wave_len * self.amt_oversample  ) as f32 )/(findlen)/downsampled_ratio;
         self.new_len = findlen as usize;
         //let z = x - 0.5;
         let z_pos; //= z.fract();
         it = self.it_unrounded.floor() as usize;
         //should z_pos have a -0.5?
         z_pos = self.it_unrounded.fract();
-        temp = ((self.c3[self.pos][it]*z_pos+self.c2[self.pos][it])*z_pos+self.c1[self.pos][it])*z_pos
-                +self.c0[self.pos][it];
+        temp = ((self.c3[mip][self.pos][it]*z_pos+self.c2[mip][self.pos][it])*z_pos+self.c1[mip][self.pos][it])*z_pos
+                +self.c0[mip][self.pos][it];
         //self.interpolated[i] = temp;
         self.it_unrounded += x;
-        if self.it_unrounded > ((self.wave_len - 1) * self.amt_oversample) as f32{
+        //
+        if self.it_unrounded > (self.mips[mip][0].len()) as f32{
             //loop back around zero.
-            self.it_unrounded -= ((self.wave_len - 1) * self.amt_oversample) as f32;
+            self.it_unrounded -= (self.mips[mip][0].len()) as f32;
         }
         return temp;
+        
 
     }
     //this is supposed to pick up after static_convolve is done. But how?
@@ -329,6 +374,9 @@ impl Default for Interp
         Interp {
             source_y : Vec::with_capacity(2048 * 256),
             waveforms : Vec::with_capacity(256),
+            mips : Vec::with_capacity(10),
+            mip_levels : 7,
+            current_mip : 0,
             len : 0,
             new_len: 0,
             wave_number : 0,
@@ -364,6 +412,26 @@ impl Default for Interp
             -0.00025542,0.0004813,0.00029091,-0.00036956,-0.00034762,0.00020506,0.00029734,-0.00014625,-0.00032069,3.0079e-06,
             0.00021017,-1.8106e-05,-0.00024653,-0.00011663,9.5114e-05,2.3485e-05,-0.0001965,-0.00021049,4.1774e-06,0.00017629,
             0.00015957,5.807e-05),
+            downsample_fir: vec!(6.6501e-05,0.00016925,0.00013554,-9.6855e-05,-0.00025644,-0.00011532,6.7101e-05,
+            -4.2646e-05,-0.00020891,-5.5997e-05,0.00014325,-3.4041e-05,-0.0002427,-5.113e-06,0.00023407,-5.8992e-05,
+            -0.00031185,6.2543e-05,0.0003345,-0.00012665,-0.00040184,0.00016754,0.00043956,-0.00024865,-0.00049771,
+            0.0003276,0.00053631,-0.00043767,-0.00057921,0.0005572,0.0006033,-0.00070362,-0.00061865,0.00086496,
+            0.00061014,-0.00105,-0.00058064,0.0012506,0.00051885,-0.0014698,-0.00042359,0.0017007,0.00028602,-0.0019419,
+            -0.00010262,0.0021861,-0.00013333,-0.0024277,0.0004261,0.0026582,-0.00078058,-0.0028689,0.0012001,0.0030488,
+            -0.0016878,-0.0031867,0.0022447,0.0032692,-0.0028717,-0.0032825,0.0035672,0.0032112,-0.0043288,-0.003039,
+            0.0051523,0.0027483,-0.0060318,-0.0023202,0.0069598,0.0017343,-0.0079273,-0.00096783,0.0089238,-5.1968e-06,
+            -0.0099377,0.0012151,0.010956,-0.0026994,-0.011965,0.0045069,0.012951,-0.0067036,-0.013899,0.0093857,0.014795,
+            -0.012698,-0.015624,0.016878,0.016373,-0.022335,-0.01703,0.029851,0.017583,-0.041109,-0.018024,0.060505,0.018345,
+            -0.10419,-0.01854,0.31767,0.5186,0.31767,-0.01854,-0.10419,0.018345,0.060505,-0.018024,-0.041109,0.017583,0.029851,
+            -0.01703,-0.022335,0.016373,0.016878,-0.015624,-0.012698,0.014795,0.0093857,-0.013899,-0.0067036,0.012951,0.0045069,
+            -0.011965,-0.0026994,0.010956,0.0012151,-0.0099377,-5.1968e-06,0.0089238,-0.00096783,-0.0079273,0.0017343,0.0069598,
+            -0.0023202,-0.0060318,0.0027483,0.0051523,-0.003039,-0.0043288,0.0032112,0.0035672,-0.0032825,-0.0028717,0.0032692,
+            0.0022447,-0.0031867,-0.0016878,0.0030488,0.0012001,-0.0028689,-0.00078058,0.0026582,0.0004261,-0.0024277,-0.00013333,
+            0.0021861,-0.00010262,-0.0019419,0.00028602,0.0017007,-0.00042359,-0.0014698,0.00051885,0.0012506,-0.00058064,-0.00105,
+            0.00061014,0.00086496,-0.00061865,-0.00070362,0.0006033,0.0005572,-0.00057921,-0.00043767,0.00053631,0.0003276,
+            -0.00049771,-0.00024865,0.00043956,0.00016754,-0.00040184,-0.00012665,0.0003345,6.2543e-05,-0.00031185,-5.8992e-05,
+            0.00023407,-5.113e-06,-0.0002427,-3.4041e-05,0.00014325,-5.5997e-05,-0.00020891,-4.2646e-05,6.7101e-05,-0.00011532,
+            -0.00025644,-9.6855e-05,0.00013554,0.00016925,6.6501e-05),
         }
     }
 }
