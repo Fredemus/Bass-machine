@@ -7,10 +7,11 @@ A full oscillator is has been implemented. Its SNR at 1kHz is at -80 dB, so its 
 The next goal is to add more features
 
 Features planned:
-* Unison voices
+* Unison voices (basically ready but pretty cpu intensive)
 * Modulation framework
-* fine and coarse tune
-* octave switches
+* filtering ✓
+* fine and coarse ✓ tune
+* octave switches ✓
 
 
 
