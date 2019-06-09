@@ -1,12 +1,195 @@
 use std::f32;
 use std::collections::VecDeque;
-#[allow(dead_code)]
-
+mod filter;
 /*
-        Slight alias problem. SNR at 1 kHz is about -80 dB. Not sure why it isn't better
+        small alias problem now. SNR at 1 kHz is about -80 dB.
+        Seems to be caused by either small mistakes in implementation or quality of interpolation algorithm
+
+        Optimization ideas : flatten vectors(possibly big improvement, way fewer cache misses. Nalgebra has tools), 
+        iterate instead of index (should be ~20% faster),
+        possibly change some vectors to arrays (could be done instead of flattening, easier).
+        the actual samples per waveform, and number of mip maps is known at compile-time.
+        Number of waveforms is not
+
 */
+#[allow(dead_code)]
+pub struct Voiceset {
+    pub(crate) oscs : Vec<Interp>,
+    //pub(crate) osc2 : Interp,
+    //tweakable synth parameters
+    pub vol : Vec<f32>, pub detune : Vec<f32>,
+    //pub osc2_vol : f32, pub det2 : f32,
+    pub voice : Vec<Voice>,
+    //vector of filters, since each voice will need its own filter when envelopes are added
+    pub filter : Vec<filter::DecentFilter>,
+    //interp_buffer gives room for filtering continuous output from oscillator. 
+    pub(crate) interp_buffer: VecDeque<f32>,
+    pub pos : Vec<usize>,
+    pub octave : Vec<i8>,
+}
+impl Voiceset
+{
+    //might require more antialiasing
+    pub fn step_one(& mut self) -> f32 {
+        let mut output = 0.;
+        //needs to have a way to go through all unison voices
+        //downsampling for loop
+        for i in 0..self.oscs[0].amt_oversample
+        {
+            let mut unfiltered_new = 0.;
+            for voice in 0..8 {
+                //add the output of the active voices together
+                if self.voice[voice].is_free() {
+                    //break;
+                } 
+                else {
+                    //let mut temp = 0.;
+                    for osc in 0..2 { //the 2 oscillators 
+                        /*temp =*/ unfiltered_new += self.single_interp(self.voice[voice].ratio * self.detune[osc], voice, osc) * self.vol[osc];
+                    }
 
+                    //self.filter[voice].tick_pivotal(temp);
+                    //unfiltered_new += self.filter[voice].vout[self.filter[voice].poles];
+                    
+                }
+            }
+            self.filter[0].tick_pivotal(unfiltered_new);
+            unfiltered_new = self.filter[0].vout[self.filter[0].poles];
+            //only every 2nd sample needs to be output for downsampling. Therefore only every 2nd sample
+            //needs to be filtered
+            if i % 2 == 0 {
+                output = self.single_convolve(&self.oscs[0].downsample_fir);
+                //output = self.interp_buffer[self.oscs[0].downsample_fir.len()]; 
+            }
+            //removes the sample that just got filtered
+            self.interp_buffer.pop_front();
+            //adds a new unfiltered sample to the end
+            self.interp_buffer.push_back(unfiltered_new);
+        }
+        return output;
+    }
+    
+    //if we calculate some samples ahead and store them in a buffer, FIR filtering might still be viable.
+    pub(crate) fn single_interp(&mut self, ratio: f32, i: usize, j : usize) -> f32 {
+        // Optimal 2x (4-point, 3rd-order) (z-form)
+        // return ((c3*z+c2)*z+c1)*z+c0;
+        //find the best mip to do the interpolation from. could be moved elsewhere to avoid calling excessively
+        let mip = (self.voice[i].current_mip as i8 + self.octave[j]) as usize; /*(1./ratio).log2().floor() as usize;*/
+        //let downsampled_ratio = 2f32.powi(self.voice[i].current_mip as i32);
+        let temp : f32;
+        let it : usize;
+        //find the new wavelength in samples
+        //let findlen = (self.oscs[j].wave_len * self.oscs[j].amt_oversample) as f32 *ratio;
+        //x is the placement of the sample compared to the last one, or the slope
+        //let x = ((self.wave_len * self.amt_oversample - 1 ) as f32 )/(findlen -1.);
+        //let x = ((self.oscs[j].wave_len * self.oscs[j].amt_oversample  ) as f32 )/(findlen)/downsampled_ratio;
+        //let x = 1./ratio;
+        let x = ratio;
+        //self.new_len = findlen as usize;
+        //let z = x - 0.5;
+        let z_pos; //= z.fract();
+        it = self.voice[i].unison_its[j][0].floor() as usize; //have a way to use each unison it in use
+        //should z_pos have a -0.5?
+        z_pos = self.voice[i].unison_its[j][0].fract(); 
+        temp = ((self.oscs[j].c3[mip][self.pos[j]][it]*z_pos+self.oscs[j].c2[mip][self.pos[j]][it])*z_pos+self.oscs[j].c1[mip][self.pos[j]][it])*z_pos
+                +self.oscs[j].c0[mip][self.pos[j]][it];
+        //self.interpolated[i] = temp;
+        self.voice[i].unison_its[j][0] += x;
+        //
+        if self.voice[i].unison_its[j][0] > (self.oscs[j].mips[mip][0].len()) as f32{
+            //loop back around zero.
+            self.voice[i].unison_its[j][0] -= (self.oscs[j].mips[mip][0].len()) as f32;
+        }
+        return temp;
+    }
+    //Convolves a single sample, based on the sample buffer
+    pub(crate) fn single_convolve(&self, p_coeffs : &Vec<f32>) -> f32 {
+        let mut convolved : f32;
+        convolved = 0.;
+        //convolved.resize(p_in.len() + p_coeffs.len(), 0.);
+        //let mut temp = self.interp_buffer.to_vec();
+        //temp.resize(new_len, 0.);
+        //n should be the length of p_in + length of p_coeffs
+        //this k value should skip the group delay?
+        let k = p_coeffs.len();
+        for i in 0..k  //  position in coefficients array
+        {   
+            //if k >= i 
+            //{  
+                convolved += p_coeffs[i] * self.interp_buffer[k - i];
+            //}
+        }
+        return convolved;
+    }
 
+}
+impl Default for Voiceset
+{
+    fn default() -> Voiceset {
+        let a = Voiceset {
+            filter : vec!(filter::DecentFilter::default(); 8),
+            oscs : vec!(Default::default(); 2), //osc2 : Default::default(),
+            vol : vec![1.;2], detune : vec![1.;2],
+            voice : vec!(Voice::default(); 8),
+            interp_buffer : VecDeque::with_capacity(200),
+            pos : vec![0; 2],
+            octave : vec![0; 2],
+        }; 
+        return a;
+    }
+}
+#[derive(Clone)]
+pub struct Voice
+{
+    free : bool,
+    //every voice can share the same interpolator
+    //pub(crate) oscs : &'a Interp,
+    unison_its : Vec<Vec<f32>>,
+    pub ratio : f32,
+    pub(crate) current_mip : usize,
+    //pos gives the current wave
+    pub note : Option<u8>,
+    //the note parameter can allow us to have note offsets for octave and semitone switches 
+    
+}
+
+#[allow(dead_code)]
+impl Voice
+{
+    pub fn reset_its(&mut self) {
+        //reset iterators. Value they get set to could be changed to change phase,
+        //or made random for analog-style random phase
+        //https://rust-lang-nursery.github.io/rust-cookbook/algorithms/randomness.html
+        self.unison_its[0][0] = 0.;
+        self.unison_its[1][0] = 0.;
+    }
+    pub fn is_free(&self) -> bool {
+        return self.free;
+    }
+    pub fn use_voice(&mut self, note : u8) {
+        self.free = false;
+        self.note = Some(note); 
+        //possibly call prep_buffer here?
+    }
+    pub fn free_voice (&mut self/*, note : u8*/) {
+        //if self.note == note {
+        self.free = true;
+        //}
+    }
+
+}
+impl Default for Voice
+{
+    fn default() -> Voice {
+        let mut a = Voice {
+                free : true, unison_its : Vec::with_capacity(7), current_mip : 0, ratio : 1.,
+                note : None};
+        a.unison_its = vec!(vec!(0.;7);2);
+        return a;
+    }
+}
+
+#[derive(Clone)]
 pub struct Interp
 {
     pub(crate) source_y : Vec<f32>,
@@ -15,52 +198,21 @@ pub struct Interp
     pub wave_len : usize,
     pub(crate) len : usize,
     pub(crate) amt_oversample : usize,
-    pub(crate) new_len : usize,
     
-    c0: Vec<Vec<Vec<f32>>>, c1: Vec<Vec<Vec<f32>>>, c2: Vec<Vec<Vec<f32>>>, c3: Vec<Vec<Vec<f32>>>,
-    fir_len : usize,
-    //interp_buffer gives room for filtering continuous output from oscillator. 
-    pub(crate) interp_buffer: VecDeque<f32>,
+    pub c0: Vec<Vec<Vec<f32>>>, c1: Vec<Vec<Vec<f32>>>, c2: Vec<Vec<Vec<f32>>>, c3: Vec<Vec<Vec<f32>>>,
+    
     pub it : usize,
-    pub it_unrounded : f32,
-    pub pos : usize,
+    
     pub(crate) upsample_fir : Vec<f32>,
     pub(crate) downsample_fir : Vec<f32>,
     mips : Vec<Vec<Vec<f32>>>,
     mip_levels: usize,
-    pub(crate) current_mip : usize,
+    
+    //create a voice_spread functions with offsets in phase and pitch
 }
 #[allow(dead_code)]
 impl Interp
 {
-    //fills a buffer we can use for fir filtering. Has to be called every time a midi on message happens
-    //or continually be filled on both note on and note off.
-    pub(crate) fn prep_buffer(&mut self, _ratio: f32) {
-        self.interp_buffer.resize(self.downsample_fir.len() + 1, 0.);
-        for i in 0..self.downsample_fir.len() -1 {
-            self.interp_buffer[i] = 0.;
-        }
-
-    }
-    //might require more antialiasing
-    pub fn step_one(& mut self, ratio: f32) -> f32 {
-        //first we filter our sample based on our output
-        let mut output = 0.;
-        let mut unfiltered_new;
-        //downsampling for loop
-        for _i in 0..self.amt_oversample
-        {
-            unfiltered_new = self.optimal_interp(ratio);
-            output = self.single_convolve(&self.downsample_fir);
-            //removes the sample that just got filtered
-            self.interp_buffer.pop_front();
-            //adds a new unfiltered sample to the end
-            self.interp_buffer.push_back(unfiltered_new);
-        }
-        return output;
-    }
-
-
     pub(crate) fn oversample(&mut self, ratio: usize){
         self.amt_oversample = ratio;
         //resize slices to fit the new length
@@ -89,7 +241,7 @@ impl Interp
     }
     pub(crate) fn downsample_2x(&self, signal : &Vec<f32>) -> Vec<f32> {
         //first we filter the signal to downsample 2x
-        let temp = self.static_convolve(&self.upsample_fir, &signal);
+        let temp = self.static_convolve(&self.downsample_fir, &signal);
         let mut output = vec![0.];
         output.resize(temp.len()/2, 0.);
         for j in 0..(signal.len() / 2) {
@@ -97,9 +249,9 @@ impl Interp
         }
         output
     }
+
     pub(crate) fn mip_map(&mut self) {
         self.mips.resize(self.mip_levels, vec![vec![0.;self.wave_len];self.mip_levels]);
-        //self.mips.resize(self.wave_number,vec![vec![0.;new_wave_len]; self.mip_levels]);
         
         //fill first layer with self.waveforms
         for i in 0..self.wave_number {
@@ -112,7 +264,8 @@ impl Interp
             }
         }
     }
-    //slices the read .wav into individual waveforms
+    //slices the read .wav into individual waveforms.
+    //source_y could be avoided, by letting it take a reference to the read .wav instead
     pub(crate) fn slice(&mut self) {
         self.len = self.source_y.len();
         self.wave_len = 2048; 
@@ -121,7 +274,6 @@ impl Interp
         for i in 0..self.wave_number {
             for j in 0..self.wave_len {
                 self.waveforms[i][j] = self.source_y[j + self.wave_len * i];
-
             }
         }
     }
@@ -185,28 +337,7 @@ impl Interp
     }
     //consider fixing some discontinuities by just setting first and last sample to original lol
     //only interpolates one waveform at a time. This means for now that you cant change waveform without changing notes.
-    pub(crate) fn interpolation(&mut self,ratio: f32 ) {
-        //find the best mip to do the interpolation from. could be moved elsewhere to avoid calling excessively
-        let mip = (1./ratio).log2().floor() as usize;
-        let downsampled_ratio = 2f32.powi(mip as i32);
-        let mut temp : f32;
-        let mut it : usize;
-        //self.new_len = ((self.len as f32) * ratio).round() as usize;
-        self.new_len = ((self.wave_len as f32) * self.amt_oversample as f32 *ratio).round() as usize;
-        //resize the vector to the new size
-        self.interp_buffer.resize(self.new_len, 0.);
-        //this should describe all the necessary values of x, since x always should be between 0 and 1
-        let x = (1. / ratio)/downsampled_ratio;
-        let x_pos = x.fract();
-        for i in 0..(self.new_len -1) {
-            it = ((i as f32) * x) as usize;
-            if i >= self.new_len - 5 {
-                println!("{}",it);
-            }
-            temp = ((self.c3[mip][self.pos][it]*x_pos+self.c2[mip][self.pos][it])*x_pos+self.c1[mip][self.pos][it])*x_pos+self.c0[mip][self.pos][it];
-            self.interp_buffer[i] = temp;
-        }
-    }
+    
     pub(crate) fn optimal_coeffs(&mut self) {
         self.len = self.source_y.len();
         let new_wave_len = self.wave_len *self.amt_oversample;
@@ -226,6 +357,7 @@ impl Interp
         self.c1.resize(self.wave_number,vec![vec![0.;new_wave_len]; self.mip_levels]);
         self.c2.resize(self.wave_number,vec![vec![0.;new_wave_len]; self.mip_levels]);
         self.c3.resize(self.wave_number,vec![vec![0.;new_wave_len]; self.mip_levels]);
+        
         //let mut n;
         for n in 0..self.mip_levels {  //n represent mip-map levels
             for i in 0..self.wave_number {
@@ -281,62 +413,6 @@ impl Interp
         }
         
     }
-    //needs downsampling.
-    //if we calculate some samples ahead and store them in a buffer, FIR filtering might still be viable.
-    pub(crate) fn optimal_interp(&mut self, ratio: f32) -> f32 {
-        // Optimal 2x (4-point, 3rd-order) (z-form)
-        // return ((c3*z+c2)*z+c1)*z+c0;
-        //find the best mip to do the interpolation from. could be moved elsewhere to avoid calling excessively
-        let mip = self.current_mip; /*(1./ratio).log2().floor() as usize;*/
-        let downsampled_ratio = 2f32.powi(self.current_mip as i32);
-        let temp : f32;
-        let it : usize;
-        //find the new wavelength in samples
-        let findlen = (self.wave_len * self.amt_oversample) as f32 *ratio;
-        //x is the placement of the sample compared to the last one, or the slope
-        //let x = ((self.wave_len * self.amt_oversample - 1 ) as f32 )/(findlen -1.);
-        let x = ((self.wave_len * self.amt_oversample  ) as f32 )/(findlen)/downsampled_ratio;
-        self.new_len = findlen as usize;
-        //let z = x - 0.5;
-        let z_pos; //= z.fract();
-        it = self.it_unrounded.floor() as usize;
-        //should z_pos have a -0.5?
-        z_pos = self.it_unrounded.fract();
-        temp = ((self.c3[mip][self.pos][it]*z_pos+self.c2[mip][self.pos][it])*z_pos+self.c1[mip][self.pos][it])*z_pos
-                +self.c0[mip][self.pos][it];
-        //self.interpolated[i] = temp;
-        self.it_unrounded += x;
-        //
-        if self.it_unrounded > (self.mips[mip][0].len()) as f32{
-            //loop back around zero.
-            self.it_unrounded -= (self.mips[mip][0].len()) as f32;
-        }
-        return temp;
-        
-
-    }
-    //this is supposed to pick up after static_convolve is done. But how?
-    pub(crate) fn single_convolve(&self, p_coeffs : &Vec<f32>) -> f32 {
-        let mut convolved : f32;
-        convolved = 0.;
-        //convolved.resize(p_in.len() + p_coeffs.len(), 0.);
-        //let mut temp = self.interp_buffer.to_vec();
-        //temp.resize(new_len, 0.);
-        //n should be the length of p_in + length of p_coeffs
-        //this k value should skip the group delay?
-        let k = p_coeffs.len();
-        {
-            for i in 0..p_coeffs.len()  //  position in coefficients array
-            {   
-                if k >= i 
-                {
-                    //println!("{}", k-i);
-                    convolved += p_coeffs[i] * self.interp_buffer[k - i];
-                }
-            }
-        }
-        return convolved;
-    }
 
     pub(crate) fn static_convolve(&self, p_coeffs : &Vec<f32>, p_in : &Vec<f32>) -> Vec<f32> {   
         //possibly more efficient convolution https://stackoverflow.com/questions/8424170/1d-linear-convolution-in-ansi-c-code
@@ -376,23 +452,18 @@ impl Default for Interp
             waveforms : Vec::with_capacity(256),
             mips : Vec::with_capacity(10),
             mip_levels : 7,
-            current_mip : 0,
             len : 0,
-            new_len: 0,
             wave_number : 0,
             amt_oversample : 1,
             wave_len : 2048,
             it : 0,
-            it_unrounded : 0.,
-            pos: 0,
-            fir_len: 179,
             //coeffs : Vec<Vec<f32>>, //hopefully this can make 2 vectors of f32
             //default capacity should take oversampling into account
+            //capacity probably needs only to be the number of mips
             c0: Vec::with_capacity(2048 * 256 * 2),
             c1: Vec::with_capacity(2048 * 256 * 2),
             c2: Vec::with_capacity(2048 * 256 * 2),
             c3: Vec::with_capacity(2048 * 256 * 2),
-            interp_buffer: VecDeque::with_capacity(180),
             
             upsample_fir: vec!( 5.807e-05,0.00015957,0.00017629,4.1774e-06,-0.00021049,-0.0001965,2.3485e-05,9.5114e-05,
             -0.00011663,-0.00024653,-1.8106e-05,0.00021017,3.0079e-06,-0.00032069,-0.00014625,0.00029734,0.00020506,
