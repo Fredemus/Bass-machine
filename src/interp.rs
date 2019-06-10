@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::f32;
 mod filter;
+mod modmatrix;
 /*
         small alias problem now. SNR at 1 kHz is about -80 dB.
         Seems to be caused by either small mistakes in implementation or quality of interpolation algorithm
@@ -71,7 +72,6 @@ impl Voiceset {
         }
         return output;
     }
-
     //if we calculate some samples ahead and store them in a buffer, FIR filtering might still be viable.
     pub(crate) fn single_interp(&mut self, ratio: f32, i: usize, j: usize) -> f32 {
         // Optimal 2x (4-point, 3rd-order) (z-form)

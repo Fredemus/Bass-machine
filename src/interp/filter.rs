@@ -1,11 +1,4 @@
-#[derive(PartialEq)]
 #[allow(dead_code)]
-enum EstimateSource {
-    State,               // use current state
-    PreviousVout,        // use z-1 of vout[n]
-    LinearStateEstimate, // use linear estimate of future state
-    LinearVoutEstimate,  // use linear estimate of vout[n]
-}
 #[derive(PartialEq)]
 enum AnalyticalMethod {
     Linear,  // linear solution
@@ -51,26 +44,8 @@ impl DecentFilter {
         self.s[3] = 2. * self.vout[3] - self.s[3];
     }
     //used for getting the starting point for estimating how to compute the filtering
-    fn get_initial_estimate(
-        &mut self,
-        input: f32,
-        filter_order: usize,
-        source: EstimateSource,
-        method: AnalyticalMethod,
-    ) -> f32 {
-        if source == EstimateSource::LinearVoutEstimate
-            || source == EstimateSource::LinearStateEstimate
-        {
-            self.run_one_step(input, method);
-        }
-        match source {
-            EstimateSource::State => self.s[filter_order],
-            EstimateSource::LinearVoutEstimate => self.vout[filter_order],
-            EstimateSource::PreviousVout => self.vout[filter_order],
-            EstimateSource::LinearStateEstimate => {
-                2. * self.vout[filter_order] - self.s[filter_order]
-            }
-        }
+    fn get_initial_estimate(&mut self, filter_order: usize) -> f32 {
+        return self.s[filter_order];
     }
 
     //performs a complete filter process (mystran's method)
@@ -79,7 +54,7 @@ impl DecentFilter {
         if self.drive > 0. {
             self.run_one_step(input * (self.drive + 0.7), AnalyticalMethod::Pivotal);
         } else {
-            self.run_one_step(input, AnalyticalMethod::Linear); //linear has a bug
+            self.run_one_step(input, AnalyticalMethod::Linear); //linear should have clipping on resonance, i think?
         }
         self.update_state();
     }
@@ -94,38 +69,11 @@ impl DecentFilter {
         //version with drive
         if method == AnalyticalMethod::Pivotal {
             let base = [
-                input
-                    - self.res
-                        * self.get_initial_estimate(
-                            input,
-                            3,
-                            EstimateSource::State,
-                            AnalyticalMethod::Linear,
-                        ),
-                self.get_initial_estimate(
-                    input,
-                    0,
-                    EstimateSource::State,
-                    AnalyticalMethod::Linear,
-                ),
-                self.get_initial_estimate(
-                    input,
-                    1,
-                    EstimateSource::State,
-                    AnalyticalMethod::Linear,
-                ),
-                self.get_initial_estimate(
-                    input,
-                    2,
-                    EstimateSource::State,
-                    AnalyticalMethod::Linear,
-                ),
-                self.get_initial_estimate(
-                    input,
-                    3,
-                    EstimateSource::State,
-                    AnalyticalMethod::Linear,
-                ),
+                input,
+                self.get_initial_estimate(0),
+                self.get_initial_estimate(1),
+                self.get_initial_estimate(2),
+                self.get_initial_estimate(3),
             ];
             //let tbase = [base[0].tanh(), base[1].tanh(),base[2].tanh()];
             for n in 0..5 {
@@ -144,19 +92,20 @@ impl DecentFilter {
             let f3 = self.g * a[3] * g3;
             let f2 = self.g * a[2] * g2 * f3;
             let f1 = self.g * a[1] * g1 * f2;
-            let f0 = self.g * a[0] * g0 * f1;
+            let f0 = self.g * g0 * f1;
             //outputs a 24db filter
-            self.vout[3] = a[4]
-                * ((f1 * g0 * self.s[0]
-                    + f2 * g1 * self.s[1]
-                    + f3 * g2 * self.s[2]
-                    + f0 * input
-                    + self.s[3] * g3)
-                    / (f0 * self.res + 1.));
+            self.vout[3] = (f0 * a[0] * input
+                + f1 * g0 * self.s[0]
+                + f2 * g1 * self.s[1]
+                + f3 * g2 * self.s[2]
+                + g3 * self.s[3])
+                / (f0 * self.res * a[3] + 1.);
+
             //since we know the feedback, we can solve the remaining outputs:
-            self.vout[0] = a[1] * g0 * (self.g * (input - self.res * self.vout[3]) + self.s[0]);
-            self.vout[1] = a[2] * g1 * (self.g * self.vout[0] + self.s[1]);
-            self.vout[2] = a[3] * g2 * (self.g * self.vout[1] + self.s[2]);
+            self.vout[0] =
+                g0 * (self.g * (a[0] * input - self.res * a[3] * self.vout[3]) + self.s[0]);
+            self.vout[1] = g1 * (self.g * a[2] * self.vout[0] + self.s[1]);
+            self.vout[2] = g2 * (self.g * a[3] * self.vout[1] + self.s[2]);
         }
         //linear version without. Clipping the feedback could avoid resonance from feedbacking to infinity
         else {
