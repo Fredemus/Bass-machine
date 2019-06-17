@@ -1,11 +1,15 @@
 /*
 
     TODO:
+    test graintable
+    figure out envelopes
     move fir filters somewhere sensible.
-    Linear moog filter isn't calculated properly. Resonance doesn't work
     Implement unison
-    Optimisation, it uses more CPU than it should. look into optimising single_conv (polyphase)
-    or single_interp
+
+
+    only way i can see to avoid groupdelay from fir is to fir filter each separately and 
+
+    Optimisation. look into optimising single_conv (polyphase) or single_interp
     Licensing. Look into MIT and copyleft
     https://docs.rs/nalgebra/0.3.2/nalgebra/struct.DVec3.html
     https://docs.rs/basic_dsp/0.2.0/basic_dsp/
@@ -22,19 +26,19 @@ use vst::plugin::{CanDo, Category, Info, Plugin};
 //used for handling .wav files
 extern crate hound;
 
-//include interpolation module:
-mod interp;
+//include voiceset module:
+mod voiceset;
 
-struct WaveTable {
+struct Synth {
     note: Option<u8>,
     note_duration: f64,
     sample_rate: f32,
     //the oscillator. More can easily be added
-    voices: interp::Voiceset,
+    voices: voiceset::Voiceset,
     wt_len: Vec<usize>,
 }
 
-impl WaveTable {
+impl Synth {
     //fills a buffer we can use for fir filtering.
     //Can be used to avoid the delay from the fir filtering. Figure out how/when to call it to avoid delay.
     pub(crate) fn prep_buffer(&mut self) {
@@ -53,7 +57,6 @@ impl WaveTable {
         //     self.voices.interp_buffer.pop_front();
         //     //adds a new unfiltered sample to the end
         //     self.voices.interp_buffer.push_back(unfiltered_new);
-
         // }
     }
     fn find_ratio(&mut self, note: u8, i: usize) -> f32 {
@@ -90,6 +93,7 @@ impl WaveTable {
         if i > 7 {
             return;
         }
+        self.voices.vol_env.restart_env(i);
         self.voices.voice[i].use_voice(note);
         self.voices.voice[i].ratio = self.find_ratio(note, i);
         //self.prep_buffer(/*self.ratio*/);
@@ -100,7 +104,7 @@ impl WaveTable {
             if self.voices.voice[i].note == Some(note) {
                 self.voices.voice[i].note = None;
                 self.voices.voice[i].free_voice();
-                self.voices.voice[i].reset_its();
+                self.voices.vol_env.note[i] = false;
             }
         }
         self.note = None;
@@ -113,11 +117,17 @@ impl WaveTable {
     }
 }
 
-impl Default for WaveTable {
-    fn default() -> WaveTable {
-        let mut osc1: interp::Interp = Default::default();
+impl Default for Synth {
+    fn default() -> Synth {
+        let mut osc1: voiceset::interp::WaveTable = Default::default();
+        // let mut dir = file!().to_owned();
+        // for i in 0..8 {
+        //     dir.pop();
+        // }
+        // dir.push_str(r"\Tables\Basic Shapes.wav");
         let mut reader = hound::WavReader::open(
-            r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav",
+            //dir
+            r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav"
         )
         .unwrap();
         osc1.source_y = reader.samples().collect::<Result<Vec<_>, _>>().unwrap();
@@ -125,7 +135,7 @@ impl Default for WaveTable {
         osc1.oversample(2);
         osc1.mip_map();
         osc1.optimal_coeffs();
-        let mut osc2: interp::Interp = Default::default();
+        let mut osc2: voiceset::interp::WaveTable = Default::default();
         let mut reader2 = hound::WavReader::open(
             r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav",
         )
@@ -136,11 +146,11 @@ impl Default for WaveTable {
         osc2.mip_map();
         osc2.optimal_coeffs();
         //let voiceset : interp::Voiceset::Default::default()
-        let mut a = WaveTable {
+        let mut a = Synth {
             note_duration: 0.0,
             note: None,
             sample_rate: 44100.,
-            voices: interp::Voiceset {
+            voices: voiceset::Voiceset {
                 oscs: vec![osc1, osc2],
                 ..Default::default()
             },
@@ -153,7 +163,7 @@ impl Default for WaveTable {
     }
 }
 
-impl Plugin for WaveTable {
+impl Plugin for Synth {
     fn set_sample_rate(&mut self, rate: f32) {
         self.sample_rate = rate;
     }
@@ -197,8 +207,7 @@ impl Plugin for WaveTable {
     fn set_parameter(&mut self, index: i32, value: f32) {
         match index {
             0 => {
-                self.voices.pos[0] =
-                    ((value * (self.voices.oscs[0].wave_number - 1) as f32).round()) as usize
+                self.voices.pos[0] = ((value * (self.voices.oscs[0].wave_number - 1) as f32).round()) as usize
             }
             1 => self.voices.vol[0] = value,
             //make some proper detune formulas. They're just eyeballed for now.
@@ -211,18 +220,17 @@ impl Plugin for WaveTable {
             5 => self.voices.vol[1] = value,
             6 => self.voices.detune[1] = 0.98 + value * 0.04,
             7 => self.voices.octave[1] = (((value - 0.5) * 3.).round()) as i8,
-            8 => {
-                self.voices.filter[0].cutoff = 20000. * (1.8f32.powf(10. * value - 10.)).min(0.999)
+            8 => { for i in 0..self.voices.filter.len() { 
+                   self.voices.filter[i].set_cutoff(value) }
             }
             //self.g = value * 10.,
-            9 => self.voices.filter[0].res = value * 4.4,
-            10 => self.voices.filter[0].poles = ((value * 3.).round()) as usize,
-            11 => self.voices.filter[0].drive = value * 5.,
+            9 => { for i in 0..self.voices.filter.len() { self.voices.filter[i].res = value * 4. } }
+            10 => { for i in 0..self.voices.filter.len() { 
+                self.voices.filter[i].poles = ((value * 3.).round()) as usize }}
+            11 => { for i in 0..self.voices.filter.len() { self.voices.filter[i].drive = value * 5. } }
             _ => (),
         }
-        self.voices.filter[0].g = (3.1415 * self.voices.filter[0].cutoff
-            / (self.voices.filter[0].sample_rate * self.voices.filter[0].oversample as f32))
-            .tan()
+        
     }
     fn get_parameter_name(&self, index: i32) -> String {
         match index {
@@ -272,14 +280,14 @@ impl Plugin for WaveTable {
         // let stereo_out = l[0].iter_mut().zip(r[0].iter_mut());
         for output_channel in outputs.into_iter() {
             for output_sample in output_channel {
-                if let Some(_current_note) = self.note {
+                //if let Some(_current_note) = self.note {
                     //outputs the next sample to be played.
                     *output_sample = self.voices.step_one();
-                } else {
+                //} else {
                     //behavior of it at note off can be seen as starting phase, and could be made a variable
                     //self.osc1.it_unrounded = 0.; // should be unison its instead
-                    *output_sample = 0.;
-                }
+                //    *output_sample = 0.;
+                //}
             }
         }
     }
@@ -290,4 +298,4 @@ impl Plugin for WaveTable {
         }
     }
 }
-plugin_main!(WaveTable);
+plugin_main!(Synth);

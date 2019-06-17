@@ -44,39 +44,65 @@ impl DecentFilter {
         self.s[3] = 2. * self.vout[3] - self.s[3];
     }
     //used for getting the starting point for estimating how to compute the filtering
-    fn get_initial_estimate(&mut self, filter_order: usize) -> f32 {
-        return self.s[filter_order];
-    }
+    // fn get_initial_estimate(&mut self, filter_order: usize) -> f32 {
+    //     return self.s[filter_order];
+    // }
 
     //performs a complete filter process (mystran's method)
-    pub fn tick_pivotal(&mut self, input: f32) {
+    pub fn tick_pivotal(&mut self, input: f32, modboy : Option<f32>) {
         //let tanh_input = input.tanh();
         if self.drive > 0. {
-            self.run_one_step(input * (self.drive + 0.7), AnalyticalMethod::Pivotal);
+            self.run_moog_nonlinear(input * (self.drive + 0.7), AnalyticalMethod::Pivotal, modboy);
         } else {
-            self.run_one_step(input, AnalyticalMethod::Linear); //linear should have clipping on resonance, i think?
+            self.run_moog_nonlinear(input, AnalyticalMethod::Linear, modboy); //linear should have clipping on resonance, i think?
         }
         self.update_state();
     }
-    fn _tick_linear(&mut self, input: f32) {
-        self.run_one_step(input, AnalyticalMethod::Linear);
+    fn _tick_simple(&mut self, input: f32) {
+        self.run_moog_simple(input * (self.drive + 0.7));
         self.update_state();
     }
+    //instead of proper nonlinearities, this just has soft-clipping on the input
+    fn run_moog_simple(&mut self, input: f32) {
+        let x = input.tanh();
+        //denominators of solutions of individual stages. Simplifies the math a bit
+            let g0 = 1. / (1. + self.g);
+            let g1 = self.g * g0 * g0;
+            let g2 = self.g * g1 * g0;
+            let g3 = self.g * g2 * g0;
+            //outputs a 24db filter
+            self.vout[3] = (g3 * self.g * x
+                + g0 * self.s[3]
+                + g1 * self.s[2]
+                + g2 * self.s[1]
+                + g3 * self.s[0])
+                / (g3 * self.g * self.res + 1.);
+            //since we know the feedback, we can solve the remaining outputs:
+            self.vout[0] = g0 * (self.g * (x - self.res * self.vout[3]) + self.s[0]);
+            self.vout[1] = g0 * (self.g * self.vout[0] + self.s[1]);
+            self.vout[2] = g0 * (self.g * self.vout[1] + self.s[2]);
+    }
 
-    // ------------------------------ linear / analytical methods ------------------------------------
-    fn run_one_step(&mut self, input: f32, method: AnalyticalMethod) {
+    //nonlinear ladder filter function.  
+    fn run_moog_nonlinear(&mut self, input: f32, method: AnalyticalMethod, modboy : Option<f32>) {
+        let g : f32;
+        if modboy == None {
+            g = self.g;
+        }
+        else {
+            g = (3.1415 * (self.cutoff * modboy.unwrap()) / (self.sample_rate)).tan();
+        }
         let mut a = [1f32; 5];
         //version with drive
         if method == AnalyticalMethod::Pivotal {
             let base = [
-                input,
-                self.get_initial_estimate(0),
-                self.get_initial_estimate(1),
-                self.get_initial_estimate(2),
-                self.get_initial_estimate(3),
+                0.,//self.res * self.s[3],
+                self.s[0],
+                self.s[1],
+                self.s[2],
+                self.s[3],
             ];
-            //let tbase = [base[0].tanh(), base[1].tanh(),base[2].tanh()];
-            for n in 0..5 {
+            for n in 0..base.len() {
                 if base[n] != 0. {
                     a[n] = base[n].tanh() / base[n];
                 } else {
@@ -84,18 +110,13 @@ impl DecentFilter {
                 }
             }
             //denominators of solutions of individual stages. Simplifies the math a bit
-            let g0 = 1. / (1. + self.g * a[1]);
-            let g1 = 1. / (1. + self.g * a[2]);
-            let g2 = 1. / (1. + self.g * a[3]);
-            let g3 = 1. / (1. + self.g * a[4]);
+            let g0 = 1. / (1. + g * a[1]); let g1 = 1. / (1. + g * a[2]);
+            let g2 = 1. / (1. + g * a[3]); let g3 = 1. / (1. + g * a[4]);
             // these are just factored out of the feedback solution. Makes the math way easier to read
-            let f3 = self.g * a[3] * g3;
-            let f2 = self.g * a[2] * g2 * f3;
-            let f1 = self.g * a[1] * g1 * f2;
-            let f0 = self.g * g0 * f1;
+            let f3 = g * a[3] * g3; let f2 = g * a[2] * g2 * f3;
+            let f1 = g * a[1] * g1 * f2; let f0 = g * g0 * f1;
             //outputs a 24db filter
-            self.vout[3] = (f0 * a[0] * input
-                + f1 * g0 * self.s[0]
+            self.vout[3] = (f0 * input + f1 * g0 * self.s[0]
                 + f2 * g1 * self.s[1]
                 + f3 * g2 * self.s[2]
                 + g3 * self.s[3])
@@ -103,28 +124,28 @@ impl DecentFilter {
 
             //since we know the feedback, we can solve the remaining outputs:
             self.vout[0] =
-                g0 * (self.g * (a[0] * input - self.res * a[3] * self.vout[3]) + self.s[0]);
-            self.vout[1] = g1 * (self.g * a[2] * self.vout[0] + self.s[1]);
-            self.vout[2] = g2 * (self.g * a[3] * self.vout[1] + self.s[2]);
+                g0 * (g * a[1] * (input - self.res * a[3] * self.vout[3]) + self.s[0]);
+            self.vout[1] = g1 * (g * a[2] * self.vout[0] + self.s[1]);
+            self.vout[2] = g2 * (g * a[3] * self.vout[1] + self.s[2]);
         }
-        //linear version without. Clipping the feedback could avoid resonance from feedbacking to infinity
+        //linear version without.
         else {
             //denominators of solutions of individual stages. Simplifies the math a bit
-            let g0 = 1. / (1. + self.g);
-            let g1 = self.g * g0 * g0;
-            let g2 = self.g * g1 * g0;
-            let g3 = self.g * g2 * g0;
+            let g0 = 1. / (1. + g);
+            let g1 = g * g0 * g0;
+            let g2 = g * g1 * g0;
+            let g3 = g * g2 * g0;
             //outputs a 24db filter
-            self.vout[3] = (g3 * self.g * input
+            self.vout[3] = (g3 * g * input
                 + g0 * self.s[3]
                 + g1 * self.s[2]
                 + g2 * self.s[1]
                 + g3 * self.s[0])
-                / (g3 * self.g * self.res + 1.);
+                / (g3 * g * self.res + 1.);
             //since we know the feedback, we can solve the remaining outputs:
-            self.vout[0] = g0 * (self.g * (input - self.res * self.vout[3]) + self.s[0]);
-            self.vout[1] = g0 * (self.g * self.vout[0] + self.s[1]);
-            self.vout[2] = g0 * (self.g * self.vout[1] + self.s[2]);
+            self.vout[0] = g0 * (g * (input - self.res * self.vout[3]) + self.s[0]);
+            self.vout[1] = g0 * (g * self.vout[0] + self.s[1]);
+            self.vout[2] = g0 * (g * self.vout[1] + self.s[2]);
         }
     }
 }
@@ -138,7 +159,6 @@ impl Default for DecentFilter {
             sample_rate: 88200.,
             cutoff: 1000.,
             res: 2.0,
-
             g: 0.07135868087,
             poles: 3,
             oversample: 1,
