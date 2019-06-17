@@ -3,12 +3,16 @@ WIP vst synthesizer written in rust.
 
 The source code is in lib.rs. Cargo.toml lists dependencies.
 
-A full oscillator has been implemented. Its SNR at 1kHz is at -80 dB, so its quality could be improved. 
+A full wavetable oscillator has been implemented. Its SNR at 1kHz is at -80 dB, so its quality could be improved. 
 The next goal is to add more features.
+
+A granular synthesis like oscillator has been implemented and needs to be tested 
 
 A 4-pole lowpass ladder filter has been implemented. More filter modes and models can be added.
 
 Envelopes are implemented, but they could potentially be more efficient.
+
+File paths for wavetables should be gotten relative to source file so other people can actually build this lol
 
 
 
