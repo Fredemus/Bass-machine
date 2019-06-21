@@ -1,4 +1,17 @@
 //stage-focused?
+//look-up tables could potentially be way faster
+/*
+By the way that formula for envelopes is 
+
+y = x e^(k(x-1)), convex 
+
+y = 1 - (1-x) e ^ (k(1-x)), concave
+k >= 0
+
+phase modulation on a linear envelope could give slope control, and only need one stage (reversed for release and limited for decay)
+
+*/
+
 #[allow(dead_code)]
 pub struct Env {
     pub output: f32,
@@ -50,7 +63,6 @@ impl Env {
                 self.time[voice] += 1;
             } 
             else if self.time[voice] < self.attack_time + self.decay_time {
-                
                 let attack_end = 1.; //could be made a parameter
                 let max = (self.decay_time as f32).powf(self.decay_slope);
                 output = attack_end - ((self.time[voice] - self.attack_time) as f32).powf(self.decay_slope) * 
@@ -134,7 +146,7 @@ impl Default for Env {
     fn default() -> Env {
         Env { 
         output: 0.,
-        time : vec![0;8],
+        time : vec![100000;8],
         attack_time : 882, //882 samples is 20ms
         attack_slope : 0.6,
         decay_time : 8820, //8820 samples is 200ms

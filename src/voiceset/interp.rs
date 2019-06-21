@@ -1,18 +1,19 @@
+extern crate hound;
+
 #[derive(Clone)]
 pub struct GrainTable {
     pub(crate) grain_size : f32,
+    pub(crate) pos: f32,
     pub(crate) source_y: Vec<f32>,
     pub(crate) waveforms: Vec<Vec<f32>>,
     pub(crate) wave_number: usize,
     pub wave_len: usize,
     pub(crate) len: usize,
     pub(crate) amt_oversample: usize,
-
     pub c0: Vec<Vec<f32>>,
     pub c1: Vec<Vec<f32>>,
     pub c2: Vec<Vec<f32>>,
     pub c3: Vec<Vec<f32>>,
-    
     pub it: usize,
     pub(crate) upsample_fir: Vec<f32>,
     pub(crate) downsample_fir: Vec<f32>,
@@ -21,6 +22,14 @@ pub struct GrainTable {
 }
 #[allow(dead_code)]
 impl GrainTable {
+    pub fn change_table(&mut self, path : String) {
+        let mut reader = hound::WavReader::open(
+        path).unwrap();
+        self.source_y = reader.samples().collect::<Result<Vec<_>, _>>().unwrap();
+        self.oversample(2);
+        self.mip_map();
+        self.optimal_coeffs();
+    }
 
     // pub fn set_pos(&mut self, value : f32) -> usize {
     //     ((value * (self.wave_number - 1) as f32).round()) as usize
@@ -87,11 +96,17 @@ impl GrainTable {
         let mut even2: f32;
         let mut odd1: f32;
         let mut odd2: f32;
-        self.c0.resize(self.wave_number,vec![0.; self.mip_levels],);
-        self.c1.resize(self.wave_number,vec![0.; self.mip_levels],);
-        self.c2.resize(self.wave_number,vec![0.; self.mip_levels],);
-        self.c3.resize(self.wave_number,vec![0.; self.mip_levels],);
         
+        self.c0.resize(self.mip_levels,vec![0.; self.mip_levels],);
+        self.c1.resize(self.mip_levels,vec![0.; self.mip_levels],);
+        self.c2.resize(self.mip_levels,vec![0.; self.mip_levels],);
+        self.c3.resize(self.mip_levels,vec![0.; self.mip_levels],);
+        for i in 0..self.mip_levels {
+            self.c0[i].resize(self.mips[i].len(), 0.);
+            self.c1[i].resize(self.mips[i].len(), 0.);
+            self.c2[i].resize(self.mips[i].len(), 0.);
+            self.c3[i].resize(self.mips[i].len(), 0.);
+        }
         for n in 0..self.mip_levels {
             //n represent mip-map levels
                 for j in 1..self.mips[n].len() - 2 {
@@ -175,6 +190,7 @@ impl Default for GrainTable {
     fn default() -> GrainTable {
         GrainTable {
             grain_size : 4096.,
+            pos : 0.,
             source_y: Vec::with_capacity(4096 * 256),
             waveforms: Vec::with_capacity(256),
             mips: Vec::with_capacity(10),
@@ -244,6 +260,15 @@ pub struct WaveTable {
 }
 #[allow(dead_code)]
 impl WaveTable {
+    pub fn change_table(&mut self, path : String) {
+        let mut reader = hound::WavReader::open(
+        path).unwrap();
+        self.source_y = reader.samples().collect::<Result<Vec<_>, _>>().unwrap();
+        self.slice();
+        self.oversample(2);
+        self.mip_map();
+        self.optimal_coeffs();
+    }
     pub(crate) fn oversample(&mut self, ratio: usize) {
         self.amt_oversample = ratio;
         //resize slices to fit the new length

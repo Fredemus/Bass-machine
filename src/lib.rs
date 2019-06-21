@@ -15,6 +15,7 @@
     https://docs.rs/basic_dsp/0.2.0/basic_dsp/
 
 */
+
 //vst stuff
 #[macro_use]
 extern crate vst;
@@ -60,15 +61,26 @@ impl Synth {
         // }
     }
     fn find_ratio(&mut self, note: u8, i: usize) -> f32 {
-        let standard = /*21.827*/ 21.53320312; //default wavetable pitch
+        let standard = /*21.827*/ 21.533203125; //default wavetable pitch
         let pn = 440f32 * (2f32.powf(1. / 12.)).powi(note as i32 - 69);
         //return ratio between desired pitch and standard
         let diff = note - 17;
         let mip = diff as usize / 12;
-        self.voices.voice[i].current_mip = mip;
+        self.voices.voice[i].wavetabe_mip = mip;
         let downsampled_ratio = 2f32.powi(mip as i32);
         //standard / pn
-        (pn / standard) / downsampled_ratio
+        (pn / downsampled_ratio) / standard
+    }
+    fn find_ratio_grain(&mut self, note : u8, i: usize) -> f32 {
+        //let standard = self.sample_rate * 2. / self.voices.g_oscs[0].grain_size;
+        let pn = 440f32 * (2f32.powf(1. / 12.)).powi(note as i32 - 69);
+        //return ratio between desired pitch and standard
+        let diff = note - 17;
+        let mip = diff as usize / 12;
+        self.voices.voice[i].grain_mip = mip;
+        let downsampled_ratio = 2f32.powi(mip as i32);
+        //standard / pn
+        (pn / downsampled_ratio)
     }
     fn process_midi_event(&mut self, data: [u8; 3]) {
         match data[0] {
@@ -94,8 +106,10 @@ impl Synth {
             return;
         }
         self.voices.vol_env.restart_env(i);
+        self.voices.mod_env.restart_env(i);
         self.voices.voice[i].use_voice(note);
         self.voices.voice[i].ratio = self.find_ratio(note, i);
+        self.voices.voice[i].grain_ratio = self.find_ratio_grain(note, i);
         //self.prep_buffer(/*self.ratio*/);
         //self.osc1.interpolated = self.osc1.static_convolve(&self.osc1.upsample_fir, &self.osc1.interpolated);
     }
@@ -105,6 +119,7 @@ impl Synth {
                 self.voices.voice[i].note = None;
                 self.voices.voice[i].free_voice();
                 self.voices.vol_env.note[i] = false;
+                self.voices.mod_env.note[i] = false;
             }
         }
         self.note = None;
@@ -121,30 +136,25 @@ impl Default for Synth {
     fn default() -> Synth {
         let mut osc1: voiceset::interp::WaveTable = Default::default();
         // let mut dir = file!().to_owned();
-        // for i in 0..8 {
+        // for i in 0..8 { //remove the \lib.rs
         //     dir.pop();
         // }
         // dir.push_str(r"\Tables\Basic Shapes.wav");
-        let mut reader = hound::WavReader::open(
-            //dir
-            r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav"
-        )
-        .unwrap();
-        osc1.source_y = reader.samples().collect::<Result<Vec<_>, _>>().unwrap();
-        osc1.slice();
-        osc1.oversample(2);
-        osc1.mip_map();
-        osc1.optimal_coeffs();
+        // let mut reader = hound::WavReader::open(
+        //     //dir
+        //     r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav"
+        // )
+        // .unwrap();
+        // osc1.source_y = reader.samples().collect::<Result<Vec<_>, _>>().unwrap();
+        // osc1.slice();
+        // osc1.oversample(2);
+        // osc1.mip_map();
+        // osc1.optimal_coeffs();
+        osc1.change_table(r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav".to_string());
         let mut osc2: voiceset::interp::WaveTable = Default::default();
-        let mut reader2 = hound::WavReader::open(
-            r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav",
-        )
-        .unwrap();
-        osc2.source_y = reader2.samples().collect::<Result<Vec<_>, _>>().unwrap();
-        osc2.slice();
-        osc2.oversample(2);
-        osc2.mip_map();
-        osc2.optimal_coeffs();
+        osc2.change_table(r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav".to_string());
+        let mut osc3: voiceset::interp::GrainTable = Default::default();
+        osc3.change_table(r"C:\Users\rasmu\RustProjects\Graintable-synth\src\Tables\12-Screamer.wav".to_string());
         //let voiceset : interp::Voiceset::Default::default()
         let mut a = Synth {
             note_duration: 0.0,
@@ -152,6 +162,7 @@ impl Default for Synth {
             sample_rate: 44100.,
             voices: voiceset::Voiceset {
                 oscs: vec![osc1, osc2],
+                g_oscs : vec![osc3],
                 ..Default::default()
             },
             wt_len: vec![7, 7],
@@ -174,7 +185,7 @@ impl Plugin for Synth {
             inputs: 0,
             outputs: 1,
             category: Category::Synth,
-            parameters: 12,
+            parameters: 20,
             ..Default::default()
         }
     }
@@ -201,6 +212,14 @@ impl Plugin for Synth {
             9 => self.voices.filter[0].res,
             10 => (self.voices.filter[0].poles) as f32 + 1.,
             11 => self.voices.filter[0].drive,
+            12 => self.voices.mod_env.attack_time as f32 / 88.2,
+            13 => self.voices.mod_env.decay_time as f32 / 88.2,            
+            14 => self.voices.mod_env.sustain,
+            15 => self.voices.mod_env.release_time as f32 / 88.2,
+            16 => self.voices.cutoff_amount,
+            17 => self.voices.g_oscs[0].pos * self.voices.g_oscs[0].source_y.len() as f32 / 88.2,
+            18 => self.voices.g_oscs[0].grain_size /88.2,
+            19 => self.voices.vol_grain,
             _ => 0.0,
         }
     }
@@ -228,7 +247,16 @@ impl Plugin for Synth {
             10 => { for i in 0..self.voices.filter.len() { 
                 self.voices.filter[i].poles = ((value * 3.).round()) as usize }}
             11 => { for i in 0..self.voices.filter.len() { self.voices.filter[i].drive = value * 5. } }
+            12 => self.voices.mod_env.attack_time = (value * 88200.) as usize,
+            13 => self.voices.mod_env.decay_time = (value * 88200.) as usize,
+            14 => self.voices.mod_env.sustain = value,
+            15 => self.voices.mod_env.release_time = (value * 88200.) as usize,
+            16 => self.voices.cutoff_amount = value,
+            17 => self.voices.g_oscs[0].pos = value,
+            18 => self.voices.g_oscs[0].grain_size = (value * 10000.).min(16.),
+            19 => self.voices.vol_grain = value,
             _ => (),
+
         }
         
     }
@@ -246,6 +274,14 @@ impl Plugin for Synth {
             9 => "res".to_string(),
             10 => "filter order".to_string(),
             11 => "drive".to_string(),
+            12 => "attack time".to_string(),
+            13 => "decay time".to_string(),
+            14 => "sustain level".to_string(),
+            15 => "release time".to_string(),
+            16 => "cutoff amount".to_string(),
+            17 => "grain pos".to_string(),
+            18 => "grain size".to_string(),
+            19 => "grain osc volume".to_string(),
             //4 => "Wet level".to_string(),
             _ => "".to_string(),
         }
@@ -264,6 +300,14 @@ impl Plugin for Synth {
             9 => "%".to_string(),
             10 => "poles".to_string(),
             11 => "%".to_string(),
+            12 => "ms".to_string(),
+            13 => "ms".to_string(),
+            14 => "%".to_string(),
+            15 => "ms".to_string(),
+            16 => "%".to_string(),
+            17 => "ms".to_string(),
+            18 => "ms".to_string(),
+            19 => "%".to_string(),
             _ => "".to_string(),
         }
     }
