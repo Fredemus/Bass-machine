@@ -7,7 +7,7 @@
     Implement unison
 
 
-    only way i can see to avoid groupdelay from fir is to fir filter each separately and 
+    only way i can see to avoid groupdelay from fir is to fir filter each separately and
 
     Optimisation. look into optimising single_conv (polyphase) or single_interp
     Licensing. Look into MIT and copyleft
@@ -31,7 +31,6 @@ extern crate hound;
 mod voiceset;
 
 struct Synth {
-    note: Option<u8>,
     note_duration: f64,
     sample_rate: f32,
     //the oscillator. More can easily be added
@@ -71,7 +70,7 @@ impl Synth {
         //standard / pn
         (pn / downsampled_ratio) / standard
     }
-    fn find_ratio_grain(&mut self, note : u8, i: usize) -> f32 {
+    fn find_ratio_grain(&mut self, note: u8, i: usize) -> f32 {
         //let standard = self.sample_rate * 2. / self.voices.g_oscs[0].grain_size;
         let pn = 440f32 * (2f32.powf(1. / 12.)).powi(note as i32 - 69);
         //return ratio between desired pitch and standard
@@ -92,7 +91,7 @@ impl Synth {
     }
     fn note_on(&mut self, note: u8) {
         self.note_duration = 0.0;
-        self.note = Some(note);
+        //self.note = Some(note);
         let mut i: usize = 9;
         //get the first free voice
         for j in 0..8 {
@@ -101,7 +100,7 @@ impl Synth {
                 break;
             }
         }
-        //if no free voices, nothing happens for now. Voice stealing should be implemented
+        // if no free voices, nothing happens for now. Voice stealing should be implemented
         if i > 7 {
             return;
         }
@@ -122,13 +121,13 @@ impl Synth {
                 self.voices.mod_env.note[i] = false;
             }
         }
-        self.note = None;
-        for i in 0..8 {
-            if !self.voices.voice[i].is_free() {
-                self.note = Some(note);
-                break; //it's enough if just one voice is free
-            }
-        }
+        // self.note = None;
+        // for i in 0..8 {
+        //     if !self.voices.voice[i].is_free() {
+        //         self.note = Some(note);
+        //         break; //it's enough if just one voice is free
+        //     }
+        // }
     }
 }
 
@@ -150,19 +149,26 @@ impl Default for Synth {
         // osc1.oversample(2);
         // osc1.mip_map();
         // osc1.optimal_coeffs();
-        osc1.change_table(r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav".to_string());
+        osc1.change_table(
+            r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav"
+                .to_string(),
+        );
         let mut osc2: voiceset::interp::WaveTable = Default::default();
-        osc2.change_table(r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav".to_string());
+        osc2.change_table(
+            r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav"
+                .to_string(),
+        );
         let mut osc3: voiceset::interp::GrainTable = Default::default();
-        osc3.change_table(r"C:\Users\rasmu\RustProjects\Graintable-synth\src\Tables\12-Screamer.wav".to_string());
+        osc3.change_table(
+            r"C:\Users\rasmu\RustProjects\Graintable-synth\src\Tables\op71_2.wav".to_string(),
+        );
         //let voiceset : interp::Voiceset::Default::default()
         let mut a = Synth {
             note_duration: 0.0,
-            note: None,
             sample_rate: 44100.,
             voices: voiceset::Voiceset {
                 oscs: vec![osc1, osc2],
-                g_oscs : vec![osc3],
+                g_oscs: vec![osc3],
                 ..Default::default()
             },
             wt_len: vec![7, 7],
@@ -185,7 +191,7 @@ impl Plugin for Synth {
             inputs: 0,
             outputs: 1,
             category: Category::Synth,
-            parameters: 20,
+            parameters: 21,
             ..Default::default()
         }
     }
@@ -213,20 +219,22 @@ impl Plugin for Synth {
             10 => (self.voices.filter[0].poles) as f32 + 1.,
             11 => self.voices.filter[0].drive,
             12 => self.voices.mod_env.attack_time as f32 / 88.2,
-            13 => self.voices.mod_env.decay_time as f32 / 88.2,            
+            13 => self.voices.mod_env.decay_time as f32 / 88.2,
             14 => self.voices.mod_env.sustain,
             15 => self.voices.mod_env.release_time as f32 / 88.2,
             16 => self.voices.cutoff_amount,
             17 => self.voices.g_oscs[0].pos * self.voices.g_oscs[0].source_y.len() as f32 / 88.2,
-            18 => self.voices.g_oscs[0].grain_size /88.2,
+            18 => self.voices.g_oscs[0].grain_size / 88.2,
             19 => self.voices.vol_grain,
+            20 => self.voices.g_uvoices as f32,
             _ => 0.0,
         }
     }
     fn set_parameter(&mut self, index: i32, value: f32) {
         match index {
             0 => {
-                self.voices.pos[0] = ((value * (self.voices.oscs[0].wave_number - 1) as f32).round()) as usize
+                self.voices.pos[0] =
+                    ((value * (self.voices.oscs[0].wave_number - 1) as f32).round()) as usize
             }
             1 => self.voices.vol[0] = value,
             //make some proper detune formulas. They're just eyeballed for now.
@@ -239,26 +247,38 @@ impl Plugin for Synth {
             5 => self.voices.vol[1] = value,
             6 => self.voices.detune[1] = 0.98 + value * 0.04,
             7 => self.voices.octave[1] = (((value - 0.5) * 3.).round()) as i8,
-            8 => { for i in 0..self.voices.filter.len() { 
-                   self.voices.filter[i].set_cutoff(value) }
+            8 => {
+                for i in 0..self.voices.filter.len() {
+                    self.voices.filter[i].set_cutoff(value)
+                }
             }
             //self.g = value * 10.,
-            9 => { for i in 0..self.voices.filter.len() { self.voices.filter[i].res = value * 4. } }
-            10 => { for i in 0..self.voices.filter.len() { 
-                self.voices.filter[i].poles = ((value * 3.).round()) as usize }}
-            11 => { for i in 0..self.voices.filter.len() { self.voices.filter[i].drive = value * 5. } }
+            9 => {
+                for i in 0..self.voices.filter.len() {
+                    self.voices.filter[i].res = value * 4.
+                }
+            }
+            10 => {
+                for i in 0..self.voices.filter.len() {
+                    self.voices.filter[i].poles = ((value * 3.).round()) as usize
+                }
+            }
+            11 => {
+                for i in 0..self.voices.filter.len() {
+                    self.voices.filter[i].drive = value * 5.
+                }
+            }
             12 => self.voices.mod_env.attack_time = (value * 88200.) as usize,
             13 => self.voices.mod_env.decay_time = (value * 88200.) as usize,
             14 => self.voices.mod_env.sustain = value,
             15 => self.voices.mod_env.release_time = (value * 88200.) as usize,
             16 => self.voices.cutoff_amount = value,
             17 => self.voices.g_oscs[0].pos = value,
-            18 => self.voices.g_oscs[0].grain_size = (value * 10000.).min(16.),
+            18 => self.voices.g_oscs[0].grain_size = (value * 20000.).max(100.),
             19 => self.voices.vol_grain = value,
+            20 => self.voices.g_uvoices = ((value * 7.).ceil()) as usize,
             _ => (),
-
         }
-        
     }
     fn get_parameter_name(&self, index: i32) -> String {
         match index {
@@ -282,6 +302,7 @@ impl Plugin for Synth {
             17 => "grain pos".to_string(),
             18 => "grain size".to_string(),
             19 => "grain osc volume".to_string(),
+            20 => "grain unison".to_string(),
             //4 => "Wet level".to_string(),
             _ => "".to_string(),
         }
@@ -308,6 +329,7 @@ impl Plugin for Synth {
             17 => "ms".to_string(),
             18 => "ms".to_string(),
             19 => "%".to_string(),
+            20 => "voices".to_string(),
             _ => "".to_string(),
         }
     }
@@ -324,14 +346,7 @@ impl Plugin for Synth {
         // let stereo_out = l[0].iter_mut().zip(r[0].iter_mut());
         for output_channel in outputs.into_iter() {
             for output_sample in output_channel {
-                //if let Some(_current_note) = self.note {
-                    //outputs the next sample to be played.
-                    *output_sample = self.voices.step_one();
-                //} else {
-                    //behavior of it at note off can be seen as starting phase, and could be made a variable
-                    //self.osc1.it_unrounded = 0.; // should be unison its instead
-                //    *output_sample = 0.;
-                //}
+                *output_sample = self.voices.step_one();
             }
         }
     }

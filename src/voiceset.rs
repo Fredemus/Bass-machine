@@ -1,20 +1,17 @@
 use std::collections::VecDeque;
 use std::f32;
-mod filter; 
-pub mod interp; 
+mod filter;
+pub mod interp;
 mod modmatrix;
 use std::f32::consts::PI;
 /*
-        Todo: 
+        Todo:
         the stuff to force envelope properly into release state doesn't seem to work (test)
 
         should probably quantise grain pos to avoid accidental fm lol
         implement unison
-            move iterators into voice struct
-            
 
-
-        clean up vec of vec
+        avoid vec of vec
 
         small alias problem now. SNR at 1 kHz is about -80 dB.
         Most likely caused by quality of interpolation algorithm
@@ -29,11 +26,12 @@ use std::f32::consts::PI;
 #[allow(dead_code)]
 pub struct Voiceset {
     pub(crate) oscs: Vec<interp::WaveTable>,
-    pub(crate) g_oscs : Vec<interp::GrainTable>,
+    pub(crate) g_oscs: Vec<interp::GrainTable>,
+    pub(crate) g_uvoices: usize,
     //pub(crate) osc2 : Interp,
     //tweakable synth parameters
     pub vol: Vec<f32>,
-    pub vol_grain : f32,
+    pub vol_grain: f32,
     pub detune: Vec<f32>,
     //pub osc2_vol : f32, pub det2 : f32,
     pub voice: Vec<Voice>,
@@ -43,100 +41,106 @@ pub struct Voiceset {
     pub(crate) interp_buffer: VecDeque<f32>,
     pub pos: Vec<usize>,
     pub octave: Vec<i8>,
-    pub vol_env : modmatrix::Env,
-    pub mod_env : modmatrix::Env,
-    pub cutoff_amount : f32,
+    pub vol_env: modmatrix::Env,
+    pub mod_env: modmatrix::Env,
+    pub cutoff_amount: f32,
 }
 impl Voiceset {
     //might require more antialiasing
     pub fn step_one(&mut self) -> f32 {
-        let mut output = 0.;
+        let output: f32;
         //needs to have a way to go through all unison voices
         //downsampling for loop
-        for i in 0..self.oscs[0].amt_oversample {
+        for _i in 0..self.oscs[0].amt_oversample {
             let mut unfiltered_new = 0.;
             for voice in 0..8 {
                 let vol_mod = self.vol_env.next(voice);
                 let env2 = self.mod_env.next(voice);
                 //add the output of the active voices together
-                if vol_mod == None { //if vol_env is none for the voice, it's done outputting
+                if vol_mod == None {
+                    //if vol_env is none for the voice, it's done outputting
                     //break;
                     self.voice[voice].reset_its();
-                } 
-                else {
+                } else {
                     let mut temp = 0.;
-                    
+
                     for osc in 0..2 {
                         //the 2 oscillators
                         temp += self.single_interp(
-                        self.voice[voice].ratio * self.detune[osc],
-                        voice,
-                        osc,
-                        ) * self.vol[osc] * vol_mod.unwrap(); 
+                            self.voice[voice].ratio * self.detune[osc],
+                            voice,
+                            osc,
+                        ) * self.vol[osc]
+                            * vol_mod.unwrap();
                     }
                     //the graintable osc
                     for osc in 0..1 {
-                        temp += self._single_interp_grain(self.voice[voice].grain_ratio, voice, osc) * self.vol_grain;
+                        for u_voice in 0..self.g_uvoices {
+                            temp += self._single_interp_grain(
+                                self.voice[voice].grain_ratio
+                                    * self.voice[voice].g_ratio_offsets[u_voice],
+                                voice,
+                                osc,
+                                u_voice,
+                            ) * self.vol_grain
+                                * vol_mod.unwrap();
+                        }
                     }
                     self.filter[voice].tick_pivotal(temp, env2, self.cutoff_amount);
                     //self.filter[voice].tick_pivotal(temp);
                     unfiltered_new += self.filter[voice].vout[self.filter[0].poles];
                 }
             }
-            
-            //only every 2nd sample needs to be output for downsampling. Therefore only every 2nd sample
-            //needs to be filtered
-            if i % 2 == 0 {
-                output = self.single_convolve(&self.oscs[0].downsample_fir);
-                //output = self.interp_buffer[self.oscs[0].downsample_fir.len()];
-            }
             //removes the sample that just got filtered
             self.interp_buffer.pop_front();
             //adds a new unfiltered sample to the end
             self.interp_buffer.push_back(unfiltered_new);
         }
+        //only every 2nd sample needs to be output for downsampling. Therefore only every 2nd sample
+        //needs to be filtered
+        output = self.single_convolve(&self.oscs[0].downsample_fir);
         return output;
     }
     // used for getting a sample from a graintable oscillator
-    pub fn _single_interp_grain(&mut self, ratio : f32, i: usize, j : usize) -> f32 {
+    pub fn _single_interp_grain(&mut self, ratio: f32, i: usize, j: usize, k: usize) -> f32 {
         let mip = (self.voice[i].grain_mip as i8) as usize; /*(1./ratio).log2().floor() as usize;*/
-        let downsampled_ratio = 2f32.powi(self.voice[i].grain_mip as i32);
-        let grain_size = self.g_oscs[j].grain_size / downsampled_ratio;
+        //let downsampled_ratio = 2f32.powi(self.voice[i].grain_mip as i32);
+        let grain_size = self.g_oscs[j].grain_size / 2f32.powi(self.voice[i].grain_mip as i32);
         let len = self.g_oscs[j].mips[mip].len();
-        let offset = (self.g_oscs[j].pos * len as f32) as usize;
+        let offset = (self.g_oscs[j].pos * self.voice[i].g_pos_offsets[k] * len as f32) as usize;
         let mut temp: f32;
         let it: usize;
-        let x = ratio / (88200. /self.g_oscs[j].grain_size);
+        let x = ratio / (88200. / self.g_oscs[j].grain_size);
         let z_pos; //= z.fract();
-        it = self.voice[i].unison_its[j][1].floor() as usize; 
-
-        z_pos = self.voice[i].unison_its[j][1].fract();
-        temp = ((self.g_oscs[j].c3[mip][it + offset] * z_pos 
-            + self.g_oscs[j].c2[mip][it + offset]) * z_pos
-            + self.g_oscs[j].c1[mip][it + offset]) * z_pos 
+        it = self.voice[i].grain_its[k].floor() as usize;
+        z_pos = self.voice[i].grain_its[k].fract();
+        temp = ((self.g_oscs[j].c3[mip][it + offset] * z_pos
+            + self.g_oscs[j].c2[mip][it + offset])
+            * z_pos
+            + self.g_oscs[j].c1[mip][it + offset])
+            * z_pos
             + self.g_oscs[j].c0[mip][it + offset];
-        self.voice[i].unison_its[j][1] += x;
-        //loop from the grain size: <- not correct
-        if self.voice[i].unison_its[j][1] >  grain_size {
-            //loop back around zero.
-            self.voice[i].unison_its[j][1] -= grain_size;
+        self.voice[i].grain_its[k] += x;
+        //loop from the grain size: 
+        if self.voice[i].grain_its[k] > grain_size {
+            self.voice[i].grain_its[k] -= grain_size;
         }
-        if self.voice[i].unison_its[j][1] > (len) as f32 {
+        if self.voice[i].grain_its[k] > (len) as f32 {
             //loop back around zero.
-            self.voice[i].unison_its[j][1] -= (len) as f32;
+            self.voice[i].grain_its[k] -= (len) as f32;
         }
-        //apply a window to the grain to declick it: 
-        temp = temp * ((1./(grain_size - 1.))*PI*self.voice[i].unison_its[j][1]).sin();
+        // save the window and iterate through it to save CPU.
+        //apply a window to the grain to declick it:
+        //temp = temp * ((1. / (grain_size - 1.)) * PI * self.voice[i].grain_its[k]).sin();
         return temp;
     }
 
-    
     //single_interp could be rethought as an iterator for WaveTable
     pub(crate) fn single_interp(&mut self, ratio: f32, i: usize, j: usize) -> f32 {
         // Optimal 2x (4-point, 3rd-order) (z-form)
         // return ((c3*z+c2)*z+c1)*z+c0;
         //find the best mip to do the interpolation from. could be moved elsewhere to avoid calling excessively
-        let mip = (self.voice[i].wavetabe_mip as i8 + self.octave[j]) as usize; 
+        let mip = (self.voice[i].wavetabe_mip as i8 + self.octave[j]) as usize;
         let temp: f32;
         let it: usize;
         //x is the placement of the sample compared to the last one, or the slope
@@ -144,21 +148,19 @@ impl Voiceset {
         //self.new_len = findlen as usize;
         //let z = x - 0.5;
         let z_pos; //= z.fract();
-        it = self.voice[i].unison_its[j][0].floor() as usize; //have a way to use each unison it in use
-                                                              //should z_pos have a -0.5?
-        z_pos = self.voice[i].unison_its[j][0].fract();
+        it = self.voice[i].wave_its[j][0].floor() as usize; // have a way to use each unison it in use
+                                                            
+        z_pos = self.voice[i].wave_its[j][0].fract(); // should z_pos have a -0.5?
         temp = ((self.oscs[j].c3[mip][self.pos[j]][it] * z_pos
             + self.oscs[j].c2[mip][self.pos[j]][it])
             * z_pos
             + self.oscs[j].c1[mip][self.pos[j]][it])
             * z_pos
             + self.oscs[j].c0[mip][self.pos[j]][it];
-        //self.interpolated[i] = temp;
-        self.voice[i].unison_its[j][0] += x;
-        //
-        if self.voice[i].unison_its[j][0] > (self.oscs[j].mips[mip][0].len()) as f32 {
+        self.voice[i].wave_its[j][0] += x;
+        if self.voice[i].wave_its[j][0] > (self.oscs[j].mips[mip][0].len()) as f32 {
             //loop back around zero.
-            self.voice[i].unison_its[j][0] -= (self.oscs[j].mips[mip][0].len()) as f32;
+            self.voice[i].wave_its[j][0] -= (self.oscs[j].mips[mip][0].len()) as f32;
         }
         return temp;
     }
@@ -187,17 +189,24 @@ impl Default for Voiceset {
     fn default() -> Voiceset {
         let a = Voiceset {
             filter: vec![filter::DecentFilter::default(); 8],
-            oscs: vec![Default::default(); 2], g_oscs: vec![Default::default(); 1],
+            oscs: vec![Default::default(); 2],
+            g_oscs: vec![Default::default(); 1],
+            g_uvoices: 1,
             vol: vec![0.; 2],
-            vol_grain : 1.,
+            vol_grain: 1.,
             detune: vec![1.; 2],
             voice: vec![Voice::default(); 8],
             interp_buffer: VecDeque::with_capacity(200),
             pos: vec![0; 2],
             octave: vec![0; 2],
-            vol_env : modmatrix::Env {decay_time : 0, sustain : 1., attack_slope : 1.6,..Default::default()},
-            mod_env : Default::default(),
-            cutoff_amount : 0.5,
+            vol_env: modmatrix::Env {
+                decay_time: 0,
+                sustain: 1.,
+                attack_slope: 1.6,
+                ..Default::default()
+            },
+            mod_env: Default::default(),
+            cutoff_amount: 0.5,
         };
         return a;
     }
@@ -207,14 +216,17 @@ pub struct Voice {
     free: bool,
     // every voice can share the same interpolator
     // pub(crate) oscs : &'a Interp,
-    unison_its: Vec<Vec<f32>>,
+    wave_its: Vec<Vec<f32>>,
+    grain_its: Vec<f32>,
+    g_pos_offsets: Vec<f32>,
+    g_ratio_offsets: Vec<f32>,
     pub ratio: f32,
     pub grain_ratio: f32,
     pub(crate) wavetabe_mip: usize,
-    pub(crate) grain_mip : usize,
+    pub(crate) grain_mip: usize,
     // pos gives the current wave
     pub note: Option<u8>,
-    pub time : usize,
+    pub time: usize,
     // the note parameter can allow us to have note offsets for octave and semitone switches
 }
 
@@ -224,8 +236,9 @@ impl Voice {
         //reset iterators. Value they get set to could be changed to change phase,
         //or made random for analog-style random phase
         //https://rust-lang-nursery.github.io/rust-cookbook/algorithms/randomness.html
-        self.unison_its[0][0] = 0.;
-        self.unison_its[1][0] = 0.;
+        self.wave_its[0][0] = 0.;
+        self.wave_its[1][0] = 0.;
+        self.grain_its = vec![0.; 7];
     }
     pub fn is_free(&self) -> bool {
         return self.free;
@@ -244,17 +257,19 @@ impl Voice {
 }
 impl Default for Voice {
     fn default() -> Voice {
-        let mut a = Voice {
+        let a = Voice {
             free: true,
-            unison_its: Vec::with_capacity(7),
+            wave_its: vec![vec![0.; 7]; 2],
+            grain_its: vec![0.; 7],
+            g_pos_offsets: vec![1., 1.012, 0.988, 1.005, 0.994, 1.008, 0.992],
+            g_ratio_offsets: vec![1., 1.001, 0.999, 1.002, 0.998, 1.004, 0.996],
             wavetabe_mip: 0,
             grain_mip: 0,
             ratio: 1.,
             grain_ratio: 1.,
             note: None,
-            time : 0,
+            time: 0,
         };
-        a.unison_its = vec![vec![0.; 7]; 2];
         return a;
     }
 }
