@@ -6,9 +6,10 @@ The source code is in lib.rs. Cargo.toml lists dependencies.
 A full wavetable oscillator has been implemented. Its SNR at 1kHz is at -80 dB, so its quality could be improved. 
 The next goal is to add more features.
 
-A granular synthesis like oscillator has been implemented and needs to be tested 
+A granular synthesis like oscillator has been implemented.
 
-A 4-pole lowpass ladder filter has been implemented. More filter modes and models can be added.
+A 4-pole lowpass ladder filter has been implemented. More filter modes and models can be added. 
+Pole mixing could be an easy way of adding some multi filters: https://mutable-instruments.net/archive/documents/pole_mixing.pdf
 
 Envelopes are implemented, but they could potentially be more efficient.
 
@@ -17,7 +18,7 @@ File paths for wavetables should be gotten relative to source file so other peop
 
 
 Features planned:
-* Unison voices (basically ready but pretty cpu intensive)
+* Unison voices (done on graintable. Really could use optimization)
 * Modulation framework (envelopes done, next step adding destinations)
 * filtering ✓
 * fine and coarse ✓ tune
