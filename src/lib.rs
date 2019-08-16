@@ -22,8 +22,12 @@ extern crate vst;
 use vst::api::{Events, Supported};
 use vst::buffer::AudioBuffer;
 use vst::event::Event;
-use vst::plugin::{CanDo, Category, Info, Plugin};
+use vst::plugin::{CanDo, Category, Info, Plugin, PluginParameters};
 
+//for gui thread
+//use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+//use vst::util::AtomicFloat;
 //used for handling .wav files
 extern crate hound;
 
@@ -160,7 +164,7 @@ impl Default for Synth {
         );
         let mut osc3: voiceset::interp::GrainTable = Default::default();
         osc3.change_table(
-            r"C:\Users\rasmu\RustProjects\Graintable-synth\src\Tables\op71_2.wav".to_string(),
+            r"C:\Users\rasmu\RustProjects\Graintable-synth\src\Tables\12-Screamer.wav".to_string(),
         );
         //let voiceset : interp::Voiceset::Default::default()
         let mut a = Synth {
@@ -204,138 +208,10 @@ impl Plugin for Synth {
             }
         }
     }
-    fn get_parameter(&self, index: i32) -> f32 {
-        match index {
-            0 => self.voices.pos[0] as f32,
-            1 => self.voices.vol[0],
-            2 => self.voices.detune[0],
-            3 => self.voices.octave[0] as f32,
-            4 => self.voices.pos[1] as f32,
-            5 => self.voices.vol[1],
-            6 => self.voices.detune[1],
-            7 => self.voices.octave[1] as f32,
-            8 => self.voices.filter[0].cutoff,
-            9 => self.voices.filter[0].res,
-            10 => (self.voices.filter[0].poles) as f32 + 1.,
-            11 => self.voices.filter[0].drive,
-            12 => self.voices.mod_env.attack_time as f32 / 88.2,
-            13 => self.voices.mod_env.decay_time as f32 / 88.2,
-            14 => self.voices.mod_env.sustain,
-            15 => self.voices.mod_env.release_time as f32 / 88.2,
-            16 => self.voices.cutoff_amount,
-            17 => self.voices.g_oscs[0].pos * self.voices.g_oscs[0].source_y.len() as f32 / 88.2,
-            18 => self.voices.g_oscs[0].grain_size / 88.2,
-            19 => self.voices.vol_grain,
-            20 => self.voices.g_uvoices as f32,
-            _ => 0.0,
-        }
-    }
-    fn set_parameter(&mut self, index: i32, value: f32) {
-        match index {
-            0 => {
-                self.voices.pos[0] =
-                    ((value * (self.voices.oscs[0].wave_number - 1) as f32).round()) as usize
-            }
-            1 => self.voices.vol[0] = value,
-            //make some proper detune formulas. They're just eyeballed for now.
-            2 => self.voices.detune[0] = 0.98 + value * 0.04,
-            3 => self.voices.octave[0] = (((value - 0.5) * 3.).round()) as i8,
-            4 => {
-                self.voices.pos[1] =
-                    ((value * (self.voices.oscs[1].wave_number - 1) as f32).round()) as usize
-            }
-            5 => self.voices.vol[1] = value,
-            6 => self.voices.detune[1] = 0.98 + value * 0.04,
-            7 => self.voices.octave[1] = (((value - 0.5) * 3.).round()) as i8,
-            8 => {
-                for i in 0..self.voices.filter.len() {
-                    self.voices.filter[i].set_cutoff(value)
-                }
-            }
-            //self.g = value * 10.,
-            9 => {
-                for i in 0..self.voices.filter.len() {
-                    self.voices.filter[i].res = value * 4.
-                }
-            }
-            10 => {
-                for i in 0..self.voices.filter.len() {
-                    self.voices.filter[i].poles = ((value * 3.).round()) as usize
-                }
-            }
-            11 => {
-                for i in 0..self.voices.filter.len() {
-                    self.voices.filter[i].drive = value * 5.
-                }
-            }
-            12 => self.voices.mod_env.attack_time = (value * 88200.) as usize,
-            13 => self.voices.mod_env.decay_time = (value * 88200.) as usize,
-            14 => self.voices.mod_env.sustain = value,
-            15 => self.voices.mod_env.release_time = (value * 88200.) as usize,
-            16 => self.voices.cutoff_amount = value,
-            17 => self.voices.g_oscs[0].pos = value,
-            18 => self.voices.g_oscs[0].grain_size = (value * 20000.).max(100.),
-            19 => self.voices.vol_grain = value,
-            20 => self.voices.g_uvoices = ((value * 7.).ceil()) as usize,
-            _ => (),
-        }
-    }
-    fn get_parameter_name(&self, index: i32) -> String {
-        match index {
-            0 => "osc1 WT pos".to_string(),
-            1 => "osc1 volume".to_string(),
-            2 => "osc1 detune".to_string(),
-            3 => "osc1 octave".to_string(),
-            4 => "osc2 WT pos".to_string(),
-            5 => "osc2 volume".to_string(),
-            6 => "osc2 detune".to_string(),
-            7 => "osc1 octave".to_string(),
-            8 => "cutoff".to_string(),
-            9 => "res".to_string(),
-            10 => "filter order".to_string(),
-            11 => "drive".to_string(),
-            12 => "attack time".to_string(),
-            13 => "decay time".to_string(),
-            14 => "sustain level".to_string(),
-            15 => "release time".to_string(),
-            16 => "cutoff amount".to_string(),
-            17 => "grain pos".to_string(),
-            18 => "grain size".to_string(),
-            19 => "grain osc volume".to_string(),
-            20 => "grain unison".to_string(),
-            //4 => "Wet level".to_string(),
-            _ => "".to_string(),
-        }
-    }
-    fn get_parameter_label(&self, index: i32) -> String {
-        match index {
-            0 => "".to_string(),
-            1 => "%".to_string(),
-            2 => "".to_string(),
-            3 => "".to_string(),
-            4 => "".to_string(),
-            5 => "%".to_string(),
-            6 => "".to_string(),
-            7 => "".to_string(),
-            8 => "Hz".to_string(),
-            9 => "%".to_string(),
-            10 => "poles".to_string(),
-            11 => "%".to_string(),
-            12 => "ms".to_string(),
-            13 => "ms".to_string(),
-            14 => "%".to_string(),
-            15 => "ms".to_string(),
-            16 => "%".to_string(),
-            17 => "ms".to_string(),
-            18 => "ms".to_string(),
-            19 => "%".to_string(),
-            20 => "voices".to_string(),
-            _ => "".to_string(),
-        }
-    }
+
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
         // Split out the input and output buffers into two vectors
-        let (_, outputs) = buffer.split();
+        let (_, mut outputs) = buffer.split();
 
         // Assume 2 channels
         // if inputs.len() != 2 || outputs.len() != 2 {
@@ -355,6 +231,9 @@ impl Plugin for Synth {
             CanDo::ReceiveMidiEvent => Supported::Yes,
             _ => Supported::Maybe,
         }
+    }
+    fn get_parameter_object(&mut self) -> Arc<dyn PluginParameters> {
+        Arc::clone(&self.voices.params) as Arc<dyn PluginParameters>
     }
 }
 plugin_main!(Synth);

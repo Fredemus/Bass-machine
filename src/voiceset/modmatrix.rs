@@ -11,20 +11,46 @@ k >= 0
 phase modulation on a linear envelope could give slope control, and only need one stage (reversed for release and limited for decay)
 
 */
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use vst::util::AtomicFloat;
+pub struct EnvParams {
+    pub attack_time: AtomicUsize,
+    pub decay_time: AtomicUsize,
+    pub sustain: AtomicFloat,
+    pub release_time: AtomicUsize,
+    pub attack_slope: AtomicFloat,
+    pub decay_slope: AtomicFloat,
+    pub release_slope: AtomicFloat,
+}
+impl Default for EnvParams {
+    fn default() -> EnvParams {
+        EnvParams {
+            attack_time: AtomicUsize::new(882),
+            decay_time: AtomicUsize::new(8820),
+            sustain: AtomicFloat::new(1.0),
+            release_time: AtomicUsize::new(882),
+            attack_slope: AtomicFloat::new(0.6),
+            decay_slope: AtomicFloat::new(0.5),
+            release_slope: AtomicFloat::new(0.6),
+            // attack_time: 882, //882 samples is 20ms
+            // attack_slope: 0.6,
+            // decay_time: 8820, //8820 samples is 200ms
+            // decay_slope: 0.5,
+            // sustain: 0.5,
+            // release_time: 882, //882 samples is 20ms
+            // release_slope: 0.6,
+        }
+    }
+}
 
 #[allow(dead_code)]
 pub struct Env {
     pub output: f32,
-    pub attack_time: usize,
-    pub decay_time: usize,
-    pub sustain: f32,
-    pub release_time: usize,
     pub time: Vec<usize>, //time in samples
-    pub attack_slope: f32,
-    pub decay_slope: f32,
-    pub release_slope: f32,
     pub note: Vec<bool>,
     pub decay_end: f32,
+    pub params: Arc<EnvParams>,
 }
 impl Env {
     pub fn restart_env(&mut self, voice: usize) {
@@ -57,46 +83,64 @@ impl Env {
     pub fn next(&mut self, voice: usize) -> Option<f32> {
         let output: f32;
         if self.note[voice] {
-            if self.time[voice] < self.attack_time {
-                let max = (self.attack_time as f32).powf(self.attack_slope);
-                output = (self.time[voice] as f32).powf(self.attack_slope) / max;
+            if self.time[voice] < self.params.attack_time.load(Ordering::Relaxed) {
+                let max = (self.params.attack_time.load(Ordering::Relaxed) as f32)
+                    .powf(self.params.attack_slope.get());
+                output = (self.time[voice] as f32).powf(self.params.attack_slope.get()) / max;
                 self.time[voice] += 1;
-            } else if self.time[voice] < self.attack_time + self.decay_time {
+            } else if self.time[voice]
+                < self.params.attack_time.load(Ordering::Relaxed)
+                    + self.params.decay_time.load(Ordering::Relaxed)
+            {
                 let attack_end = 1.; //could be made a parameter
-                let max = (self.decay_time as f32).powf(self.decay_slope);
+                let max = (self.params.decay_time.load(Ordering::Relaxed) as f32)
+                    .powf(self.params.decay_slope.get());
                 output = attack_end
-                    - ((self.time[voice] - self.attack_time) as f32).powf(self.decay_slope)
-                        * (attack_end - self.sustain)
+                    - ((self.time[voice] - self.params.attack_time.load(Ordering::Relaxed)) as f32)
+                        .powf(self.params.decay_slope.get())
+                        * (attack_end - self.params.sustain.get())
                         / max;
                 self.time[voice] += 1;
             } else {
-                output = self.sustain;
+                output = self.params.sustain.get();
             }
         } else {
             //moves to release stage forcibly
-            if self.time[voice] < self.attack_time + self.decay_time {
+            if self.time[voice]
+                < self.params.attack_time.load(Ordering::Relaxed)
+                    + self.params.decay_time.load(Ordering::Relaxed)
+            {
                 //we set a decay end here, to make sure release is always smooth.
                 self.note[voice] = true;
                 self.time[voice] -= 1;
                 self.decay_end = self.next(voice).unwrap();
                 self.note[voice] = false;
-                self.time[voice] = self.attack_time + self.decay_time;
+                self.time[voice] = self.params.attack_time.load(Ordering::Relaxed)
+                    + self.params.decay_time.load(Ordering::Relaxed);
             }
             //if envelope is done, we can return None to tell the rest that it's done
-            if self.time[voice] - self.attack_time - self.decay_time >= self.release_time {
+            if self.time[voice]
+                - self.params.attack_time.load(Ordering::Relaxed)
+                - self.params.decay_time.load(Ordering::Relaxed)
+                >= self.params.release_time.load(Ordering::Relaxed)
+            {
                 self.decay_end = 0.;
                 return None;
             } else {
-                let max = (self.release_time as f32).powf(self.release_slope);
+                let max = (self.params.release_time.load(Ordering::Relaxed) as f32)
+                    .powf(self.params.release_slope.get());
                 let decay_end: f32;
                 if self.decay_end != 0. {
                     decay_end = self.decay_end;
                 } else {
-                    decay_end = self.sustain;
+                    decay_end = self.params.sustain.get();
                 }
                 output = decay_end
-                    - ((self.time[voice] - self.attack_time - self.decay_time) as f32)
-                        .powf(self.release_slope)
+                    - ((self.time[voice]
+                        - self.params.attack_time.load(Ordering::Relaxed)
+                        - self.params.decay_time.load(Ordering::Relaxed))
+                        as f32)
+                        .powf(self.params.release_slope.get())
                         * decay_end
                         / max;
                 self.time[voice] += 1;
@@ -146,13 +190,7 @@ impl Default for Env {
         Env {
             output: 0.,
             time: vec![100000; 8],
-            attack_time: 882, //882 samples is 20ms
-            attack_slope: 0.6,
-            decay_time: 8820, //8820 samples is 200ms
-            decay_slope: 0.5,
-            sustain: 0.5,
-            release_time: 882, //882 samples is 20ms
-            release_slope: 0.6,
+            params: Arc::new(EnvParams::default()),
             note: vec![false; 8],
             decay_end: 0.,
         }
