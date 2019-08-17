@@ -34,7 +34,7 @@ extern crate hound;
 //include voiceset module:
 mod voiceset;
 
-struct Synth {
+pub struct Synth {
     note_duration: f64,
     sample_rate: f32,
     //the oscillator. More can easily be added
@@ -93,7 +93,7 @@ impl Synth {
         }
         //change pitched_buffer here?
     }
-    fn note_on(&mut self, note: u8) {
+    pub fn note_on(&mut self, note: u8) {
         self.note_duration = 0.0;
         //self.note = Some(note);
         let mut i: usize = 9;

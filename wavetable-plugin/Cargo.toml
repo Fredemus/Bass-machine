@@ -7,6 +7,8 @@ edition = "2018"
 [dependencies]
 vst = { git = "https://github.com/rust-dsp/rust-vst" }
 hound = "3.4.0"
-[lib]
-name = "wave_table"
-crate-type = ["cdylib"]
+
+# FIXME(will): integration tests require an actual rust crate to be exported, not a cdylib
+#[lib]
+#name = "wave_table"
+#crate-type = ["cdylib"]
