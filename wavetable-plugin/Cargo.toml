@@ -1,0 +1,12 @@
+[package]
+name = "wave_table"
+version = "0.2.0"
+authors = ["rasmu"]
+edition = "2018"
+
+[dependencies]
+vst = { git = "https://github.com/rust-dsp/rust-vst" }
+hound = "3.4.0"
+[lib]
+name = "wave_table"
+crate-type = ["cdylib"]
