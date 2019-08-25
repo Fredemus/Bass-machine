@@ -1,7 +1,6 @@
 extern crate hound;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use vst::util::AtomicFloat;
+use crate::util::{AtomicF32, AtomicUsize};
 pub fn mip_offset(mip: usize, len: usize) -> usize {
     let amount = match mip {
         0 => 0.,
@@ -19,15 +18,15 @@ pub fn mip_offset(mip: usize, len: usize) -> usize {
     (len as f32 * amount) as usize
 }
 pub struct GrainParams {
-    pub(crate) grain_size: AtomicFloat,
-    pub(crate) pos: AtomicFloat,
-    pub(crate) len: AtomicUsize,
+    pub grain_size: AtomicF32,
+    pub pos: AtomicF32,
+    pub len: AtomicUsize,
 }
 impl Default for GrainParams {
     fn default() -> GrainParams {
         GrainParams {
-            grain_size: AtomicFloat::new(4096.),
-            pos: AtomicFloat::new(0.),
+            grain_size: AtomicF32::new(4096.),
+            pos: AtomicF32::new(0.),
             len: AtomicUsize::new(0),
         }
     }
@@ -110,7 +109,7 @@ impl GrainTable {
     }
 
     pub(crate) fn optimal_coeffs(&mut self) {
-        self.params.len.store(self.source_y.len(), Ordering::Relaxed);
+        self.params.len.set(self.source_y.len());
         //let len = self.params.len;
         let len = self.source_y.len();
         /*

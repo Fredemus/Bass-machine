@@ -73,11 +73,15 @@ version = "0.2.0"
 dependencies = [
  "hound 3.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vst 0.1.0 (git+https://github.com/rust-dsp/rust-vst)",
+ "wavetable 0.1.0",
 ]
 
 [[package]]
 name = "wavetable"
 version = "0.1.0"
+dependencies = [
+ "hound 3.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "winapi"

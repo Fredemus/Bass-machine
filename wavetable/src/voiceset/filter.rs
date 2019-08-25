@@ -1,7 +1,6 @@
 use std::f32::consts::PI;
-use std::sync::atomic::{AtomicUsize};
 use std::sync::Arc;
-use vst::util::AtomicFloat;
+use crate::util::{AtomicF32, AtomicUsize};
 #[derive(PartialEq)]
 #[allow(dead_code)]
 /*
@@ -35,30 +34,30 @@ impl Default for LadderFilter {
 }
 pub struct LadderParameters {
     // the "cutoff" parameter. Determines how heavy filtering is
-    pub cutoff: AtomicFloat,
-    pub g: AtomicFloat,
+    pub cutoff: AtomicF32,
+    pub g: AtomicF32,
     // needed to calculate cutoff.
-    sample_rate: AtomicFloat,
+    sample_rate: AtomicF32,
     // makes a peak at cutoff
-    pub res: AtomicFloat,
+    pub res: AtomicF32,
     // used to choose where we want our output to be
     pub poles: AtomicUsize,
     // pole_value is just to be able to use get_parameter on poles
-    pub pole_value: AtomicFloat,
+    pub pole_value: AtomicF32,
     // a drive parameter. Just used to increase the volume, which results in heavier distortion
-    pub drive: AtomicFloat,
+    pub drive: AtomicF32,
 }
 
 impl Default for LadderParameters {
     fn default() -> LadderParameters {
         LadderParameters {
-            cutoff: AtomicFloat::new(1000.),
-            res: AtomicFloat::new(2.),
+            cutoff: AtomicF32::new(1000.),
+            res: AtomicF32::new(2.),
             poles: AtomicUsize::new(3),
-            pole_value: AtomicFloat::new(1.),
-            drive: AtomicFloat::new(0.),
-            sample_rate: AtomicFloat::new(44100.),
-            g: AtomicFloat::new(0.07135868087),
+            pole_value: AtomicF32::new(1.),
+            drive: AtomicF32::new(0.),
+            sample_rate: AtomicF32::new(44100.),
+            g: AtomicF32::new(0.07135868087),
         }
     }
 }

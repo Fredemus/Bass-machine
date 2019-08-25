@@ -1,13 +1,6 @@
 extern crate hound;
 
-extern crate vst;
-
-use vst::{
-    host::HostBuffer,
-    plugin::Plugin,
-};
-
-use wave_table::Synth;
+use wavetable::Synth;
 
 const SAMPLES: &'static [&'static [u8]] = &[
     &[60],
@@ -17,25 +10,23 @@ const SAMPLES: &'static [&'static [u8]] = &[
 
 fn process_note_samples_mono(notes: &[u8], samples: usize) -> [Vec<f32>; 1] {
     let mut plugin = Synth::default();
-    let mut host_buffer: HostBuffer<f32> = HostBuffer::new(1, 1);
-    let inputs = [vec![0.0; samples]];
     let mut outputs = [vec![0.0; samples]];
-    let mut audio_buffer = host_buffer.bind(&inputs, &mut outputs);
+    let mut buffer = outputs.iter_mut().map(|buf| &mut buf[..]);
     for &note in notes {
         plugin.note_on(note);
     }
-    plugin.process(&mut audio_buffer);
+    plugin.process(samples, &mut buffer);
     outputs
 }
 
-fn process_note_samples_stereo(note: u8, samples: usize) -> [Vec<f32>; 2] {
+fn process_note_samples_stereo(notes: &[u8], samples: usize) -> [Vec<f32>; 2] {
     let mut plugin = Synth::default();
-    let mut host_buffer: HostBuffer<f32> = HostBuffer::new(2, 2);
-    let inputs = [vec![0.0; samples], vec![0.0; samples]];
     let mut outputs = [vec![0.0; samples], vec![0.0; samples]];
-    let mut audio_buffer = host_buffer.bind(&inputs, &mut outputs);
-    plugin.note_on(note);
-    plugin.process(&mut audio_buffer);
+    let mut buffer = outputs.iter_mut().map(|buf| &mut buf[..]);
+    for &note in notes {
+        plugin.note_on(note);
+    }
+    plugin.process(samples, &mut buffer);
     outputs
 }
 

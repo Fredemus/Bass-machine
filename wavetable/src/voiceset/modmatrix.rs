@@ -11,28 +11,27 @@ k >= 0
 phase modulation on a linear envelope could give slope control, and only need one stage (reversed for release and limited for decay)
 
 */
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use vst::util::AtomicFloat;
+use crate::util::{AtomicF32, AtomicUsize};
 pub struct EnvParams {
     pub attack_time: AtomicUsize,
     pub decay_time: AtomicUsize,
-    pub sustain: AtomicFloat,
+    pub sustain: AtomicF32,
     pub release_time: AtomicUsize,
-    pub attack_slope: AtomicFloat,
-    pub decay_slope: AtomicFloat,
-    pub release_slope: AtomicFloat,
+    pub attack_slope: AtomicF32,
+    pub decay_slope: AtomicF32,
+    pub release_slope: AtomicF32,
 }
 impl Default for EnvParams {
     fn default() -> EnvParams {
         EnvParams {
             attack_time: AtomicUsize::new(882),
             decay_time: AtomicUsize::new(8820),
-            sustain: AtomicFloat::new(1.0),
+            sustain: AtomicF32::new(1.0),
             release_time: AtomicUsize::new(882),
-            attack_slope: AtomicFloat::new(0.6),
-            decay_slope: AtomicFloat::new(0.5),
-            release_slope: AtomicFloat::new(0.6),
+            attack_slope: AtomicF32::new(0.6),
+            decay_slope: AtomicF32::new(0.5),
+            release_slope: AtomicF32::new(0.6),
             // attack_time: 882, //882 samples is 20ms
             // attack_slope: 0.6,
             // decay_time: 8820, //8820 samples is 200ms
@@ -83,20 +82,20 @@ impl Env {
     pub fn next(&mut self, voice: usize) -> Option<f32> {
         let output: f32;
         if self.note[voice] {
-            if self.time[voice] < self.params.attack_time.load(Ordering::Relaxed) {
-                let max = (self.params.attack_time.load(Ordering::Relaxed) as f32)
+            if self.time[voice] < self.params.attack_time.get() {
+                let max = (self.params.attack_time.get() as f32)
                     .powf(self.params.attack_slope.get());
                 output = (self.time[voice] as f32).powf(self.params.attack_slope.get()) / max;
                 self.time[voice] += 1;
             } else if self.time[voice]
-                < self.params.attack_time.load(Ordering::Relaxed)
-                    + self.params.decay_time.load(Ordering::Relaxed)
+                < self.params.attack_time.get()
+                    + self.params.decay_time.get()
             {
                 let attack_end = 1.; //could be made a parameter
-                let max = (self.params.decay_time.load(Ordering::Relaxed) as f32)
+                let max = (self.params.decay_time.get() as f32)
                     .powf(self.params.decay_slope.get());
                 output = attack_end
-                    - ((self.time[voice] - self.params.attack_time.load(Ordering::Relaxed)) as f32)
+                    - ((self.time[voice] - self.params.attack_time.get()) as f32)
                         .powf(self.params.decay_slope.get())
                         * (attack_end - self.params.sustain.get())
                         / max;
@@ -107,27 +106,27 @@ impl Env {
         } else {
             //moves to release stage forcibly
             if self.time[voice]
-                < self.params.attack_time.load(Ordering::Relaxed)
-                    + self.params.decay_time.load(Ordering::Relaxed)
+                < self.params.attack_time.get()
+                    + self.params.decay_time.get()
             {
                 //we set a decay end here, to make sure release is always smooth.
                 self.note[voice] = true;
                 self.time[voice] -= 1;
                 self.decay_end = self.next(voice).unwrap();
                 self.note[voice] = false;
-                self.time[voice] = self.params.attack_time.load(Ordering::Relaxed)
-                    + self.params.decay_time.load(Ordering::Relaxed);
+                self.time[voice] = self.params.attack_time.get()
+                    + self.params.decay_time.get();
             }
             //if envelope is done, we can return None to tell the rest that it's done
             if self.time[voice]
-                - self.params.attack_time.load(Ordering::Relaxed)
-                - self.params.decay_time.load(Ordering::Relaxed)
-                >= self.params.release_time.load(Ordering::Relaxed)
+                - self.params.attack_time.get()
+                - self.params.decay_time.get()
+                >= self.params.release_time.get()
             {
                 self.decay_end = 0.;
                 return None;
             } else {
-                let max = (self.params.release_time.load(Ordering::Relaxed) as f32)
+                let max = (self.params.release_time.get() as f32)
                     .powf(self.params.release_slope.get());
                 let decay_end: f32;
                 if self.decay_end != 0. {
@@ -137,8 +136,8 @@ impl Env {
                 }
                 output = decay_end
                     - ((self.time[voice]
-                        - self.params.attack_time.load(Ordering::Relaxed)
-                        - self.params.decay_time.load(Ordering::Relaxed))
+                        - self.params.attack_time.get()
+                        - self.params.decay_time.get())
                         as f32)
                         .powf(self.params.release_slope.get())
                         * decay_end
