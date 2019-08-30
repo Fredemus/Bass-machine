@@ -1,44 +1,16 @@
-/*
-
-    TODO:
-    test graintable
-    figure out envelopes
-    move fir filters somewhere sensible.
-    Implement unison
-
-
-    only way i can see to avoid groupdelay from fir is to fir filter each separately and
-
-    Optimisation. look into optimising single_conv (polyphase) or single_interp
-    Licensing. Look into MIT and copyleft
-    https://docs.rs/nalgebra/0.3.2/nalgebra/struct.DVec3.html
-    https://docs.rs/basic_dsp/0.2.0/basic_dsp/
-
-*/
-
-//vst stuff
-#[macro_use]
-extern crate vst;
-use vst::api::{Events, Supported};
-use vst::buffer::AudioBuffer;
-use vst::event::Event;
-use vst::plugin::{CanDo, Category, Info, Plugin, PluginParameters};
-
-//for gui thread
-//use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 //use vst::util::AtomicFloat;
 //used for handling .wav files
 extern crate hound;
 
 //include voiceset module:
-mod voiceset;
+pub mod voiceset;
+mod util;
 
-struct Synth {
+pub struct Synth {
     note_duration: f64,
-    sample_rate: f32,
+    pub sample_rate: f32, // FIXME(will): should not be pub
     //the oscillator. More can easily be added
-    voices: voiceset::Voiceset,
+    pub voices: voiceset::Voiceset, // FIXME(will): should not be pub
     wt_len: Vec<usize>,
 }
 
@@ -85,7 +57,7 @@ impl Synth {
         //standard / pn
         (pn / downsampled_ratio)
     }
-    fn process_midi_event(&mut self, data: [u8; 3]) {
+    pub fn process_midi_event(&mut self, data: [u8; 3]) {
         match data[0] {
             128 => self.note_off(data[1]),
             144 => self.note_on(data[1]),
@@ -93,7 +65,7 @@ impl Synth {
         }
         //change pitched_buffer here?
     }
-    fn note_on(&mut self, note: u8) {
+    pub fn note_on(&mut self, note: u8) {
         self.note_duration = 0.0;
         //self.note = Some(note);
         let mut i: usize = 9;
@@ -116,7 +88,7 @@ impl Synth {
         //self.prep_buffer(/*self.ratio*/);
         //self.osc1.interpolated = self.osc1.static_convolve(&self.osc1.upsample_fir, &self.osc1.interpolated);
     }
-    fn note_off(&mut self, note: u8) {
+    pub fn note_off(&mut self, note: u8) {
         for i in 0..8 {
             if self.voices.voice[i].note == Some(note) {
                 self.voices.voice[i].note = None;
@@ -132,6 +104,18 @@ impl Synth {
         //         break; //it's enough if just one voice is free
         //     }
         // }
+    }
+
+    pub fn process<'a, I>(&mut self, samples: usize, outputs: I) where I: IntoIterator<Item=&'a mut [f32]> {
+        let mut output_sample;
+        let mut outputs = outputs.into_iter().collect::<Vec<_>>();
+        for sample_idx in 0..samples {
+            output_sample = self.voices.step_one();
+
+            for buff in outputs.iter_mut() {
+                buff[sample_idx] = output_sample;
+            }
+        }
     }
 }
 
@@ -184,56 +168,10 @@ impl Default for Synth {
     }
 }
 
-impl Plugin for Synth {
-    fn set_sample_rate(&mut self, rate: f32) {
-        self.sample_rate = rate;
-    }
-    fn get_info(&self) -> Info {
-        Info {
-            name: "WaveTable".to_string(),
-            unique_id: 9264,
-            inputs: 0,
-            outputs: 1,
-            category: Category::Synth,
-            parameters: 21,
-            ..Default::default()
-        }
-    }
-    fn process_events(&mut self, events: &Events) {
-        for event in events.events() {
-            match event {
-                Event::Midi(ev) => self.process_midi_event(ev.data),
-                // More events can be handled here.
-                _ => (),
-            }
-        }
-    }
-
-    fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
-        // Split out the input and output buffers into two vectors
-        let (_, mut outputs) = buffer.split();
-
-        // Assume 2 channels
-        // if inputs.len() != 2 || outputs.len() != 2 {
-        //     return;
-        // }
-        //  // Iterate over outputs as (&mut f32, &mut f32)
-        // let (mut l, mut r) = outputs.split_at_mut(1);
-        // let stereo_out = l[0].iter_mut().zip(r[0].iter_mut());
-        for output_channel in outputs.into_iter() {
-            for output_sample in output_channel {
-                *output_sample = self.voices.step_one();
-            }
-        }
-    }
-    fn can_do(&self, can_do: CanDo) -> Supported {
-        match can_do {
-            CanDo::ReceiveMidiEvent => Supported::Yes,
-            _ => Supported::Maybe,
-        }
-    }
-    fn get_parameter_object(&mut self) -> Arc<dyn PluginParameters> {
-        Arc::clone(&self.voices.params) as Arc<dyn PluginParameters>
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() {
+        assert_eq!(2 + 2, 4);
     }
 }
-plugin_main!(Synth);
