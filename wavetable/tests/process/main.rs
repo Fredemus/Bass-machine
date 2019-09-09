@@ -19,7 +19,7 @@ fn process_note_samples_mono(notes: &[u8], samples: usize) -> [Vec<f32>; 1] {
     outputs
 }
 
-fn process_note_samples_stereo(notes: &[u8], samples: usize) -> [Vec<f32>; 2] {
+fn _process_note_samples_stereo(notes: &[u8], samples: usize) -> [Vec<f32>; 2] {
     let mut plugin = Synth::default();
     let mut outputs = [vec![0.0; samples], vec![0.0; samples]];
     let mut buffer = outputs.iter_mut().map(|buf| &mut buf[..]);
@@ -36,7 +36,7 @@ fn test_process_mono() {
         let stem = format!("sample-{}", notes.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("-"));
         let file = format!("{}/tests/process/{}.wav", env!("CARGO_MANIFEST_DIR"), stem);
         println!("{}", file);
-        let mut reader = hound::WavReader::open(file).unwrap();
+        let reader = hound::WavReader::open(file).unwrap();
         let [output] = process_note_samples_mono(notes, 44100);
         assert!(
             reader.into_samples::<f32>()

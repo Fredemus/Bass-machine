@@ -6,11 +6,9 @@ mod modmatrix;
 use std::f32::consts::PI;
 use std::sync::Arc;
 use crate::util::{AtomicI8, AtomicUsize, AtomicF32};
+mod resampling;
 /*
         Todo:
-        optimize mip_offset function (match arms?)
-
-        the stuff to force envelope properly into release state doesn't seem to work (test)
 
         should probably quantise grain pos to avoid accidental fm lol
         implement unison
@@ -63,9 +61,9 @@ pub struct Parameters {
 }
 
 #[allow(dead_code)]
-pub struct Voiceset {
-    pub(crate) oscs: Vec<interp::WaveTable>,
-    pub(crate) g_oscs: Vec<interp::GrainTable>,
+pub struct Voiceset<'a> {
+    pub(crate) oscs: Vec<interp::WaveTable<'a>>,
+    pub(crate) g_oscs: Vec<interp::GrainTable<'a>>,
     //vector of filters, since each voice will need its own filter when envelopes are added
     pub filter: Vec<filter::LadderFilter>,
     //pub osc2_vol : f32, pub det2 : f32,
@@ -78,7 +76,7 @@ pub struct Voiceset {
     pub mod_env: modmatrix::Env,
     pub params: Arc<Parameters>,
 }
-impl Voiceset {
+impl<'a> Voiceset<'a> {
     // might require more antialiasing
     pub fn step_one(&mut self) -> f32 {
         let output: f32;
@@ -198,7 +196,7 @@ impl Voiceset {
         return temp;
     }
     //Convolves a single sample, based on the sample buffer
-    pub(crate) fn single_convolve(&self, p_coeffs: &Vec<f32>) -> f32 {
+    pub(crate) fn single_convolve(&self, p_coeffs: &[f32]) -> f32 {
         let mut convolved: f32;
         convolved = 0.;
         //convolved.resize(p_in.len() + p_coeffs.len(), 0.);
@@ -218,8 +216,8 @@ impl Voiceset {
         return convolved;
     }
 }
-impl Default for Voiceset {
-    fn default() -> Voiceset {
+impl<'a> Default for Voiceset<'a> {
+    fn default() -> Voiceset<'a> {
         let filters = vec![filter::LadderFilter::default(); 8];
         let modenv = modmatrix::Env::default();
         let mod_env_params = modenv.params.clone();

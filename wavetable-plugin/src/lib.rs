@@ -30,8 +30,8 @@ extern crate wavetable;
 use wavetable::Synth as WavetableSynth;
 use wavetable::voiceset::Parameters as WavetableParameters;
 
-struct Synth {
-    synth: WavetableSynth,
+struct Synth<'a> {
+    synth: WavetableSynth<'a>,
     params: Arc<Parameters>,
 }
 
@@ -39,8 +39,8 @@ struct Parameters {
     inner: Arc<WavetableParameters>,
 }
 
-impl Default for Synth {
-    fn default() -> Synth {
+impl<'a> Default for Synth<'a> {
+    fn default() -> Synth<'a> {
         let synth = WavetableSynth::default();
         let params = Arc::new(Parameters {
             inner: Arc::clone(&synth.voices.params),
@@ -56,7 +56,7 @@ impl Default for Synth {
 //use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-impl Plugin for Synth {
+impl<'a> Plugin for Synth<'a> {
     fn set_sample_rate(&mut self, rate: f32) {
         self.synth.sample_rate = rate;
     }

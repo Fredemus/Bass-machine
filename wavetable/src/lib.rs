@@ -6,15 +6,14 @@ extern crate hound;
 pub mod voiceset;
 mod util;
 
-pub struct Synth {
+pub struct Synth<'a> {
     note_duration: f64,
     pub sample_rate: f32, // FIXME(will): should not be pub
-    //the oscillator. More can easily be added
-    pub voices: voiceset::Voiceset, // FIXME(will): should not be pub
+    pub voices: voiceset::Voiceset<'a>, // FIXME(will): should not be pub
     wt_len: Vec<usize>,
 }
 
-impl Synth {
+impl<'a> Synth<'a> {
     //fills a buffer we can use for fir filtering.
     //Can be used to avoid the delay from the fir filtering. Figure out how/when to call it to avoid delay.
     pub(crate) fn prep_buffer(&mut self) {
@@ -24,19 +23,9 @@ impl Synth {
         for i in 0..self.voices.oscs[0].downsample_fir.len() - 1 {
             self.voices.interp_buffer[i] = 0.;
         }
-        //not sure how to use the stuff underneath with multiple voices or legato, if it's even possible
-        //fills the buffer with actual samples to avoid delay
-        // for _i in 0..(self.voices.osc1.downsample_fir.len()-1)/2
-        // {
-        //     let unfiltered_new = self.voices.single_interp(_ratio, 0);
-        //     //removes a sample in front
-        //     self.voices.interp_buffer.pop_front();
-        //     //adds a new unfiltered sample to the end
-        //     self.voices.interp_buffer.push_back(unfiltered_new);
-        // }
     }
     fn find_ratio(&mut self, note: u8, i: usize) -> f32 {
-        let standard = /*21.827*/ 21.533203125; //default wavetable pitch
+        let standard = 21.533203125; //default wavetable pitch
         let pn = 440f32 * (2f32.powf(1. / 12.)).powi(note as i32 - 69);
         //return ratio between desired pitch and standard
         let diff = note - 17;
@@ -63,11 +52,9 @@ impl Synth {
             144 => self.note_on(data[1]),
             _ => (),
         }
-        //change pitched_buffer here?
     }
     pub fn note_on(&mut self, note: u8) {
         self.note_duration = 0.0;
-        //self.note = Some(note);
         let mut i: usize = 9;
         //get the first free voice
         for j in 0..8 {
@@ -76,7 +63,8 @@ impl Synth {
                 break;
             }
         }
-        // if no free voices, nothing happens for now. Voice stealing should be implemented
+        // if no free voices, nothing happens for now. Voice stealing should be implemented.
+        // voice stealing requires keeping track of which voice was played last.
         if i > 7 {
             return;
         }
@@ -85,8 +73,6 @@ impl Synth {
         self.voices.voice[i].use_voice(note);
         self.voices.voice[i].ratio = self.find_ratio(note, i);
         self.voices.voice[i].grain_ratio = self.find_ratio_grain(note, i);
-        //self.prep_buffer(/*self.ratio*/);
-        //self.osc1.interpolated = self.osc1.static_convolve(&self.osc1.upsample_fir, &self.osc1.interpolated);
     }
     pub fn note_off(&mut self, note: u8) {
         for i in 0..8 {
@@ -97,21 +83,13 @@ impl Synth {
                 self.voices.mod_env.note[i] = false;
             }
         }
-        // self.note = None;
-        // for i in 0..8 {
-        //     if !self.voices.voice[i].is_free() {
-        //         self.note = Some(note);
-        //         break; //it's enough if just one voice is free
-        //     }
-        // }
     }
 
-    pub fn process<'a, I>(&mut self, samples: usize, outputs: I) where I: IntoIterator<Item=&'a mut [f32]> {
+    pub fn process<'b, I>(&mut self, samples: usize, outputs: I) where I: IntoIterator<Item=&'b mut [f32]> {
         let mut output_sample;
         let mut outputs = outputs.into_iter().collect::<Vec<_>>();
         for sample_idx in 0..samples {
             output_sample = self.voices.step_one();
-
             for buff in outputs.iter_mut() {
                 buff[sample_idx] = output_sample;
             }
@@ -119,8 +97,8 @@ impl Synth {
     }
 }
 
-impl Default for Synth {
-    fn default() -> Synth {
+impl<'a> Default for Synth<'a> {
+    fn default() -> Synth<'a> {
         let mut osc1: voiceset::interp::WaveTable = Default::default();
         // let mut dir = file!().to_owned();
         // for i in 0..8 { //remove the \lib.rs
