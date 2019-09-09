@@ -5,6 +5,7 @@ extern crate hound;
 //include voiceset module:
 pub mod voiceset;
 mod util;
+pub mod resources;
 
 pub struct Synth<'a> {
     note_duration: f64,
@@ -99,6 +100,8 @@ impl<'a> Synth<'a> {
 
 impl<'a> Default for Synth<'a> {
     fn default() -> Synth<'a> {
+        let tables = resources::tables().unwrap();
+
         let mut osc1: voiceset::interp::WaveTable = Default::default();
         // let mut dir = file!().to_owned();
         // for i in 0..8 { //remove the \lib.rs
@@ -115,19 +118,11 @@ impl<'a> Default for Synth<'a> {
         // osc1.oversample(2);
         // osc1.mip_map();
         // osc1.optimal_coeffs();
-        osc1.change_table(
-            r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav"
-                .to_string(),
-        );
+        osc1.change_table(&tables[0]);
         let mut osc2: voiceset::interp::WaveTable = Default::default();
-        osc2.change_table(
-            r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav"
-                .to_string(),
-        );
+        osc2.change_table(&tables[0]);
         let mut osc3: voiceset::interp::GrainTable = Default::default();
-        osc3.change_table(
-            r"C:\Users\rasmu\RustProjects\Graintable-synth\src\Tables\12-Screamer.wav".to_string(),
-        );
+        osc3.change_table(&tables[0]);
         //let voiceset : interp::Voiceset::Default::default()
         let mut a = Synth {
             note_duration: 0.0,

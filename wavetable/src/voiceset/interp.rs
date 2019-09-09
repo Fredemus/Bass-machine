@@ -1,7 +1,12 @@
-extern crate hound;
 use std::sync::Arc;
-use crate::util::{AtomicF32, AtomicUsize};
+
+use crate::{
+    resources::Table,
+    util::{AtomicF32, AtomicUsize},
+};
+
 mod fir;
+
 pub fn mip_offset(mip: usize, len: usize) -> usize {
     let amount = match mip {
         0 => 0.,
@@ -51,9 +56,8 @@ pub struct GrainTable<'a> {
 }
 #[allow(dead_code)]
 impl<'a> GrainTable<'a> {
-    pub fn change_table(&mut self, path: String) {
-        let mut reader = hound::WavReader::open(path).unwrap();
-        self.source_y = reader.samples().collect::<Result<Vec<_>, _>>().unwrap();
+    pub fn change_table(&mut self, table: &Table) {
+        self.source_y = table.clone().load().unwrap();
         self.oversample(2);
         self.mip_map();
         self.optimal_coeffs();
@@ -277,9 +281,8 @@ pub struct WaveTable<'a> {
 }
 #[allow(dead_code)]
 impl<'a> WaveTable<'a> {
-    pub fn change_table(&mut self, path: String) {
-        let mut reader = hound::WavReader::open(path).unwrap();
-        self.source_y = reader.samples().collect::<Result<Vec<_>, _>>().unwrap();
+    pub fn change_table(&mut self, table: &Table) {
+        self.source_y = table.clone().load().unwrap();
         self.slice();
         self.oversample(2);
         self.mip_map();
