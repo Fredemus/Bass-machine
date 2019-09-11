@@ -14,7 +14,7 @@ pub fn mip_offset(mip: usize, len: usize) -> usize {
         2 => 1.5,
         3 => 1.75,
         4 => 1.875,
-        5 => 1.9375, 
+        5 => 1.9375,
         6 => 1.96875,
         7 => 1.984375,
         8 => 1.9921875,
@@ -61,7 +61,9 @@ impl<'a> GrainTable<'a> {
         self.oversample(2);
         self.mip_map();
         self.optimal_coeffs();
-        // number of waves in table needs to be passed to params to avoid crashes 
+        println!("setting len to {}", self.source_y.len());
+        self.params.len.set(self.source_y.len());
+        println!("len here is {}", self.params.len.get());
     }
 
     pub fn mip_len(&self, mip: usize) -> usize {
@@ -492,7 +494,7 @@ impl<'a> WaveTable<'a> {
         }
     }
 
-    pub(crate) fn static_convolve(&self, p_coeffs:&[f32], p_in: &Vec<f32>) -> Vec<f32> {
+    pub(crate) fn static_convolve(&self, p_coeffs: &[f32], p_in: &Vec<f32>) -> Vec<f32> {
         //possibly more efficient convolution https://stackoverflow.com/questions/8424170/1d-linear-convolution-in-ansi-c-code
         //convolution could be significantly sped up by doing it in the frequency domain. from O(n^2) to O(n*log(n))
         let mut convolved: Vec<f32>;

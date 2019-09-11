@@ -3,9 +3,9 @@ use std::f32;
 mod filter;
 pub mod interp;
 mod modmatrix;
+use crate::util::{AtomicF32, AtomicI8, AtomicUsize};
 use std::f32::consts::PI;
 use std::sync::Arc;
-use crate::util::{AtomicI8, AtomicUsize, AtomicF32};
 mod resampling;
 /*
         Todo:
@@ -57,7 +57,6 @@ pub struct Parameters {
     //other stuff
     pub wave_number1: usize,
     pub wave_number2: usize,
-
 }
 
 #[allow(dead_code)]
@@ -118,8 +117,7 @@ impl<'a> Voiceset<'a> {
                     }
                     self.filter[voice].tick_pivotal(temp, env2, self.params.cutoff_amount.get());
                     //self.filter[voice].tick_pivotal(temp);
-                    unfiltered_new += self.filter[voice].vout
-                        [self.filter[0].params.poles.get()];
+                    unfiltered_new += self.filter[voice].vout[self.filter[0].params.poles.get()];
                 }
             }
             //removes the sample that just got filtered
@@ -171,8 +169,7 @@ impl<'a> Voiceset<'a> {
         // Optimal 2x (4-point, 3rd-order) (z-form)
         // return ((c3*z+c2)*z+c1)*z+c0;
         //find the best mip to do the interpolation from. could be moved elsewhere to avoid calling excessively
-        let mip = (self.voice[i].wavetabe_mip as i8 + self.params.octave[j].get())
-            as usize;
+        let mip = (self.voice[i].wavetabe_mip as i8 + self.params.octave[j].get()) as usize;
         let temp: f32;
         let it: usize;
         //x is the placement of the sample compared to the last one, or the slope
@@ -222,10 +219,19 @@ impl<'a> Default for Voiceset<'a> {
         let modenv = modmatrix::Env::default();
         let mod_env_params = modenv.params.clone();
         let filter_params = filters.iter().map(|f| f.params.clone()).collect();
-        let g_oscs = vec![interp::GrainTable::default(); 1];
-        let g_params = g_oscs.iter().map(|g| g.params.clone()).collect();
+        // creates the wavetable oscillators
+        let tables = crate::resources::tables().unwrap();
+        let mut osc1: interp::WaveTable = Default::default();
+        osc1.change_table(&tables[0]);
+        let mut osc2: interp::WaveTable = Default::default();
+        osc2.change_table(&tables[0]);
+        // creates the graintable oscillator and gets access to its parameter object
+        let mut g_oscs = vec![interp::GrainTable::default(); 2];
+        let g_params: Vec<Arc<interp::GrainParams>> =
+            g_oscs.iter().map(|g| g.params.clone()).collect();
+        g_oscs[0].change_table(&tables[0]);
         let a = Voiceset {
-            oscs: vec![Default::default(); 2],
+            oscs: vec![osc1, osc2],
             g_oscs: g_oscs,
             filter: filters,
             voice: vec![Voice::default(); 8],

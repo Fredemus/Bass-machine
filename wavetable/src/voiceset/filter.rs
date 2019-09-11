@@ -1,6 +1,6 @@
+use crate::util::{AtomicF32, AtomicUsize};
 use std::f32::consts::PI;
 use std::sync::Arc;
-use crate::util::{AtomicF32, AtomicUsize};
 #[derive(PartialEq)]
 #[allow(dead_code)]
 /*

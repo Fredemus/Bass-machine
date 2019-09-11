@@ -3,20 +3,19 @@
 extern crate hound;
 
 //include voiceset module:
-pub mod voiceset;
-mod util;
 pub mod resources;
+mod util;
+pub mod voiceset;
 
 pub struct Synth<'a> {
     note_duration: f64,
-    pub sample_rate: f32, // FIXME(will): should not be pub
+    pub sample_rate: f32,               // FIXME(will): should not be pub
     pub voices: voiceset::Voiceset<'a>, // FIXME(will): should not be pub
     wt_len: Vec<usize>,
 }
 
 impl<'a> Synth<'a> {
-    //fills a buffer we can use for fir filtering.
-    //Can be used to avoid the delay from the fir filtering. Figure out how/when to call it to avoid delay.
+    // fills a buffer we can use for fir filtering.
     pub(crate) fn prep_buffer(&mut self) {
         self.voices
             .interp_buffer
@@ -26,9 +25,9 @@ impl<'a> Synth<'a> {
         }
     }
     fn find_ratio(&mut self, note: u8, i: usize) -> f32 {
-        let standard = 21.533203125; //default wavetable pitch
+        let standard = 21.533203125; // default wavetable pitch
         let pn = 440f32 * (2f32.powf(1. / 12.)).powi(note as i32 - 69);
-        //return ratio between desired pitch and standard
+        // return ratio between desired pitch and standard
         let diff = note - 17;
         let mip = diff as usize / 12;
         self.voices.voice[i].wavetabe_mip = mip;
@@ -86,7 +85,10 @@ impl<'a> Synth<'a> {
         }
     }
 
-    pub fn process<'b, I>(&mut self, samples: usize, outputs: I) where I: IntoIterator<Item=&'b mut [f32]> {
+    pub fn process<'b, I>(&mut self, samples: usize, outputs: I)
+    where
+        I: IntoIterator<Item = &'b mut [f32]>,
+    {
         let mut output_sample;
         let mut outputs = outputs.into_iter().collect::<Vec<_>>();
         for sample_idx in 0..samples {
@@ -100,36 +102,11 @@ impl<'a> Synth<'a> {
 
 impl<'a> Default for Synth<'a> {
     fn default() -> Synth<'a> {
-        let tables = resources::tables().unwrap();
-
-        let mut osc1: voiceset::interp::WaveTable = Default::default();
-        // let mut dir = file!().to_owned();
-        // for i in 0..8 { //remove the \lib.rs
-        //     dir.pop();
-        // }
-        // dir.push_str(r"\Tables\Basic Shapes.wav");
-        // let mut reader = hound::WavReader::open(
-        //     //dir
-        //     r"C:\Users\rasmu\Documents\Xfer\Serum Presets\Tables\Analog\Basic Shapes.wav"
-        // )
-        // .unwrap();
-        // osc1.source_y = reader.samples().collect::<Result<Vec<_>, _>>().unwrap();
-        // osc1.slice();
-        // osc1.oversample(2);
-        // osc1.mip_map();
-        // osc1.optimal_coeffs();
-        osc1.change_table(&tables[0]);
-        let mut osc2: voiceset::interp::WaveTable = Default::default();
-        osc2.change_table(&tables[0]);
-        let mut osc3: voiceset::interp::GrainTable = Default::default();
-        osc3.change_table(&tables[0]);
         //let voiceset : interp::Voiceset::Default::default()
         let mut a = Synth {
             note_duration: 0.0,
             sample_rate: 44100.,
             voices: voiceset::Voiceset {
-                oscs: vec![osc1, osc2],
-                g_oscs: vec![osc3],
                 ..Default::default()
             },
             wt_len: vec![7, 7],

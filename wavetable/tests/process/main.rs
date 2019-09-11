@@ -2,11 +2,7 @@ extern crate hound;
 
 use wavetable::Synth;
 
-const SAMPLES: &'static [&'static [u8]] = &[
-    &[60],
-    &[41, 48],
-    &[77, 80, 84],
-];
+const SAMPLES: &'static [&'static [u8]] = &[&[60], &[41, 48], &[77, 80, 84]];
 
 fn process_note_samples_mono(notes: &[u8], samples: usize) -> [Vec<f32>; 1] {
     let mut plugin = Synth::default();
@@ -29,24 +25,45 @@ fn _process_note_samples_stereo(notes: &[u8], samples: usize) -> [Vec<f32>; 2] {
     plugin.process(samples, &mut buffer);
     outputs
 }
+// simple test for debugging. used for checking if a variable has the expected value
+// has to be run with cargo test -- --nocapture or the println! will be suppressed
+#[test]
+fn test_variable_value() {
+    let mut plugin = Synth::default();
+    println!(
+        "value of the len is {:?}",
+        plugin.voices.params.grain_params[0].len.get()
+    );
+    println!(
+        "vlue of cutoff is  {}",
+        plugin.voices.params.filter_params[0].cutoff.get()
+    );
+}
 
 #[test]
+#[ignore]
 fn test_process_mono() {
     for notes in SAMPLES.iter() {
-        let stem = format!("sample-{}", notes.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("-"));
+        let stem = format!(
+            "sample-{}",
+            notes
+                .iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join("-")
+        );
         let file = format!("{}/tests/process/{}.wav", env!("CARGO_MANIFEST_DIR"), stem);
         println!("{}", file);
         let reader = hound::WavReader::open(file).unwrap();
         let [output] = process_note_samples_mono(notes, 44100);
-        assert!(
-            reader.into_samples::<f32>()
-                .map(|sample| sample.expect("failed to decode WAV stream"))
-                .zip(output)
-                .all(|(exp, out)| {
-                    println!("{:?} == {:?}", out, exp);
-                    out == exp
-                })
-        );
+        assert!(reader
+            .into_samples::<f32>()
+            .map(|sample| sample.expect("failed to decode WAV stream"))
+            .zip(output)
+            .all(|(exp, out)| {
+                println!("{:?} == {:?}", out, exp);
+                out == exp
+            }));
     }
 }
 
@@ -54,7 +71,14 @@ fn test_process_mono() {
 #[ignore] // FIXME(will): tests with fs side-effects are a little weird but this works for now
 fn write_test_samples_mono() {
     for notes in SAMPLES.iter() {
-        let stem = format!("sample-{}", notes.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("-"));
+        let stem = format!(
+            "sample-{}",
+            notes
+                .iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join("-")
+        );
         let file = format!("{}/tests/process/{}.wav", env!("CARGO_MANIFEST_DIR"), stem);
         println!("{}", file);
         let [output] = process_note_samples_mono(notes, 44100);
