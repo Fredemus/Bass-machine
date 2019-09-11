@@ -59,16 +59,16 @@ impl AllpassCascade {
         output
     }
 }
-struct HalfbandFilter {
+pub struct HalfbandFilter {
     filter_a: AllpassCascade,
     filter_b: AllpassCascade,
     old_out: f32,
 }
 
 impl HalfbandFilter {
-    fn setup(&mut self, order: usize, steep: bool) {
-        let mut a_coefficients = vec![0.; 6];
-        let mut b_coefficients = vec![0.; 6];
+    pub fn setup(&mut self, order: usize, steep: bool) {
+        let a_coefficients : Vec<f32>;
+        let b_coefficients : Vec<f32>;
 
         if steep == true {
             if order == 12
@@ -220,30 +220,75 @@ impl HalfbandFilter {
             }
         }
         let mut allpasses_a = [Allpass::default(); 6];
-        for i in 0..order {
+        for i in 0..order/2 {
             allpasses_a[i].a = a_coefficients[i];
         }
         let filter_a = AllpassCascade {
-            num_filters: order,
+            num_filters: order/2,
             allpasses: allpasses_a,
         };
         self.filter_a = filter_a;
 
         let mut allpasses_b = [Allpass::default(); 6];
-        for i in 0..order {
+        for i in 0..order/2 {
             allpasses_b[i].a = b_coefficients[i];
         }
         let filter_b = AllpassCascade {
-            num_filters: order,
+            num_filters: order/2,
             allpasses: allpasses_b,
         };
         self.filter_b = filter_b;
 
         self.old_out = 0.0;
     }
-    fn process(&mut self, input: f32) -> f32 {
+    pub fn process(&mut self, input: f32) -> f32 {
         let output = (self.filter_a.process(input) + self.old_out) * 0.5;
         self.old_out = self.filter_b.process(input);
         return output;
     }
 }
+
+impl Default for HalfbandFilter {
+    fn default() -> HalfbandFilter {
+        let a_coefficients = vec![
+            0.01677466677723562,
+            0.13902148819717805,
+            0.3325011117394731,
+            0.53766105314488,
+            0.7214184024215805,
+            0.8821858402078155,
+        ];
+
+        let b_coefficients = vec![
+            0.06501319274445962,
+            0.23094129990840923,
+            0.4364942348420355,
+            0.6329609551399348, //0.06329609551399348
+            0.80378086794111226,
+            0.9599687404800694,
+        ];
+        let mut allpasses_a = [Allpass::default(); 6];
+        for i in 0..12/2 {
+            allpasses_a[i].a = a_coefficients[i];
+        }
+        let filter_a = AllpassCascade {
+            num_filters: 12/2,
+            allpasses: allpasses_a,
+        };
+        let mut allpasses_b = [Allpass::default(); 6];
+        for i in 0..12/2 {
+            allpasses_b[i].a = b_coefficients[i];
+        }
+        let filter_b = AllpassCascade {
+            num_filters: 12/2,
+            allpasses: allpasses_b,
+        };
+        HalfbandFilter {
+            filter_a: filter_a,
+            filter_b: filter_b,
+            old_out: 0.0,
+        }
+
+    }
+}
+

@@ -61,9 +61,6 @@ impl<'a> GrainTable<'a> {
         self.oversample(2);
         self.mip_map();
         self.optimal_coeffs();
-        println!("setting len to {}", self.source_y.len());
-        self.params.len.set(self.source_y.len());
-        println!("len here is {}", self.params.len.get());
     }
 
     pub fn mip_len(&self, mip: usize) -> usize {

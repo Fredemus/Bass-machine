@@ -5,6 +5,8 @@ use std::sync::Arc;
 #[allow(dead_code)]
 /*
     Rethink modboy's use so it directly changes parameters? Potentially avoids some conditionals
+    Modboy kinda sucks to use. Change how it modulates cutoff (one way instead of both?)
+
 */
 enum Method {
     Linear,  // linear solution
@@ -169,60 +171,4 @@ impl LadderParameters {
     pub fn get_cutoff(&self) -> f32 {
         1. + 0.1701297528 * (0.00005 * self.cutoff.get()).ln()
     }
-    // pub fn set_poles(&self, value: f32) {
-    //     self.pole_value.set(value);
-    //     self.poles
-    //         .store(((value * 3.).round()) as usize, Ordering::Relaxed);
-    // }
 }
-// impl PluginParameters for LadderParameters {
-//     // get_parameter has to return the value used in set_parameter
-//     fn get_parameter(&self, index: i32) -> f32 {
-//         match index {
-//             0 => self.get_cutoff(),
-//             1 => self.res.get() / 4.,
-//             2 => self.pole_value.get(),
-//             3 => self.drive.get() / 5.,
-//             _ => 0.0,
-//         }
-//     }
-//     fn set_parameter(&self, index: i32, value: f32) {
-//         match index {
-//             0 => self.set_cutoff(value),
-//             1 => self.res.set(value * 4.),
-//             2 => self.set_poles(value),
-//             3 => self.drive.set(value * 5.),
-//             _ => (),
-//         }
-//     }
-
-//     fn get_parameter_name(&self, index: i32) -> String {
-//         match index {
-//             0 => "cutoff".to_string(),
-//             1 => "resonance".to_string(),
-//             2 => "filter order".to_string(),
-//             3 => "drive".to_string(),
-//             _ => "".to_string(),
-//         }
-//     }
-//     fn get_parameter_label(&self, index: i32) -> String {
-//         match index {
-//             0 => "Hz".to_string(),
-//             1 => "%".to_string(),
-//             2 => "poles".to_string(),
-//             3 => "%".to_string(),
-//             _ => "".to_string(),
-//         }
-//     }
-//     // This is what will display underneath our control.  We can
-//     // format it into a string that makes the most sense.
-//     fn get_parameter_text(&self, index: i32) -> String {
-//         match index {
-//             0 => format!("{:.0}", self.cutoff.get()),
-//             1 => format!("{:.3}", self.res.get()),
-//             2 => format!("{}", self.poles.load(Ordering::Relaxed) + 1),
-//             3 => format!("{:.3}", self.drive.get()),
-//             _ => format!(""),
-//         }
-//     }
-// }

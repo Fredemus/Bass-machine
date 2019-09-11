@@ -1,12 +1,14 @@
 use std::collections::VecDeque;
 use std::f32;
+use std::f32::consts::PI;
+use std::sync::Arc;
+
 mod filter;
 pub mod interp;
 mod modmatrix;
-use crate::util::{AtomicF32, AtomicI8, AtomicUsize};
-use std::f32::consts::PI;
-use std::sync::Arc;
 mod resampling;
+use crate::util::{AtomicF32, AtomicI8, AtomicUsize};
+
 /*
         Todo:
 
@@ -70,28 +72,30 @@ pub struct Voiceset<'a> {
 
     //interp_buffer gives room for filtering continuous output from oscillator.
     pub(crate) interp_buffer: VecDeque<f32>,
+    pub poly_iir: resampling::HalfbandFilter,
 
     pub vol_env: modmatrix::Env,
     pub mod_env: modmatrix::Env,
     pub params: Arc<Parameters>,
 }
 impl<'a> Voiceset<'a> {
-    // might require more antialiasing
     pub fn step_one(&mut self) -> f32 {
-        let output: f32;
-        //needs to have a way to go through all unison voices
+        let mut output: f32 = 0.;
         //downsampling for loop
         for _i in 0..self.oscs[0].amt_oversample {
             let mut unfiltered_new = 0.;
             for voice in 0..8 {
-                let vol_mod = self.vol_env.next(voice);
-                let env2 = self.mod_env.next(voice);
-                //add the output of the active voices together
-                if vol_mod == None {
+                
+                // this if-condition needs to be happened to something that happens once instead of continually
+                if self.vol_env.output[voice] == None {
                     //if vol_env is none for the voice, it's done outputting
                     //break;
-                    self.voice[voice].reset_its();
+                // add the output of the active voices together
                 } else {
+                    let vol_mod = self.vol_env.output[voice].unwrap();
+                    self.vol_env.next(voice);
+                    self.mod_env.next(voice);
+                    let env2 = self.mod_env.output[voice];
                     let mut temp = 0.;
                     //the 2 oscillators
                     for osc in 0..2 {
@@ -100,7 +104,7 @@ impl<'a> Voiceset<'a> {
                             voice,
                             osc,
                         ) * self.params.vol[osc].get()
-                            * vol_mod.unwrap();
+                            * vol_mod;
                     }
                     //the graintable osc
                     for osc in 0..1 {
@@ -112,7 +116,7 @@ impl<'a> Voiceset<'a> {
                                 osc,
                                 u_voice,
                             ) * self.params.vol_grain.get()
-                                * vol_mod.unwrap();
+                                * vol_mod;
                         }
                     }
                     self.filter[voice].tick_pivotal(temp, env2, self.params.cutoff_amount.get());
@@ -120,14 +124,17 @@ impl<'a> Voiceset<'a> {
                     unfiltered_new += self.filter[voice].vout[self.filter[0].params.poles.get()];
                 }
             }
-            //removes the sample that just got filtered
-            self.interp_buffer.pop_front();
-            //adds a new unfiltered sample to the end
-            self.interp_buffer.push_back(unfiltered_new);
+            //----------- IIR FILTERING ------------------// 
+            output = self.poly_iir.process(unfiltered_new);
+            //----------- FIR FILTERING BELOW ------------//
+            // //removes the sample that just got filtered
+            // self.interp_buffer.pop_front();
+            // //adds a new unfiltered sample to the end
+            // self.interp_buffer.push_back(unfiltered_new);
         }
         //only every 2nd sample needs to be output for downsampling. Therefore only every 2nd sample
         //needs to be filtered
-        output = self.single_convolve(&self.oscs[0].downsample_fir);
+        // output = self._single_sample_convolve(&self.oscs[0].downsample_fir);
         return output;
     }
     // used for getting a sample from a graintable oscillator
@@ -193,7 +200,7 @@ impl<'a> Voiceset<'a> {
         return temp;
     }
     //Convolves a single sample, based on the sample buffer
-    pub(crate) fn single_convolve(&self, p_coeffs: &[f32]) -> f32 {
+    pub(crate) fn _single_sample_convolve(&self, p_coeffs: &[f32]) -> f32 {
         let mut convolved: f32;
         convolved = 0.;
         //convolved.resize(p_in.len() + p_coeffs.len(), 0.);
@@ -230,7 +237,11 @@ impl<'a> Default for Voiceset<'a> {
         let g_params: Vec<Arc<interp::GrainParams>> =
             g_oscs.iter().map(|g| g.params.clone()).collect();
         g_oscs[0].change_table(&tables[0]);
+        let mut poly_iir = resampling::HalfbandFilter::default();
+        //sets the halfband filter to 8th order steep
+        poly_iir.setup(8, true);
         let a = Voiceset {
+            poly_iir: poly_iir,
             oscs: vec![osc1, osc2],
             g_oscs: g_oscs,
             filter: filters,

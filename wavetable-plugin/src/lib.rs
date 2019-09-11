@@ -27,8 +27,8 @@ use vst::plugin::{CanDo, Category, Info, Plugin, PluginParameters};
 
 extern crate wavetable;
 
-use wavetable::Synth as WavetableSynth;
 use wavetable::voiceset::Parameters as WavetableParameters;
+use wavetable::Synth as WavetableSynth;
 
 struct Synth<'a> {
     synth: WavetableSynth<'a>,
@@ -45,10 +45,7 @@ impl<'a> Default for Synth<'a> {
         let params = Arc::new(Parameters {
             inner: Arc::clone(&synth.voices.params),
         });
-        Synth {
-            synth,
-            params,
-        }
+        Synth { synth, params }
     }
 }
 
@@ -106,7 +103,7 @@ impl PluginParameters for Parameters {
             3 => self.inner.octave[0].get() as f32 / 4. + 0.5,
             4 => self.inner.pos[1].get() as f32 / (self.inner.wave_number1 as f32 - 1.),
             5 => self.inner.vol[1].get(),
-            6 => self.inner.detune[1].get() * 25. -  24.5,
+            6 => self.inner.detune[1].get() * 25. - 24.5,
             7 => self.inner.octave[1].get() as f32 / 4. + 0.5,
             8 => self.inner.filter_params[0].get_cutoff(),
             9 => self.inner.filter_params[0].res.get() / 4.,
@@ -126,16 +123,14 @@ impl PluginParameters for Parameters {
     }
     fn set_parameter(&self, index: i32, value: f32) {
         match index {
-            0 => self.inner.pos[0].set(
-                ((value * (self.inner.wave_number1 - 1) as f32).round()) as usize,
-            ),
+            0 => self.inner.pos[0]
+                .set(((value * (self.inner.wave_number1 - 1) as f32).round()) as usize),
             1 => self.inner.vol[0].set(value),
-            // make some proper detune formulas. They're just eyeballed for now.
+            // FIXME: make some proper detune formulas. They're just eyeballed for now.
             2 => self.inner.detune[0].set(0.98 + value * 0.04),
             3 => self.inner.octave[0].set((((value - 0.5) * 3.).round()) as i8),
-            4 => self.inner.pos[1].set(
-                ((value * (self.inner.wave_number2 - 1) as f32).round()) as usize,
-            ),
+            4 => self.inner.pos[1]
+                .set(((value * (self.inner.wave_number2 - 1) as f32).round()) as usize),
             5 => self.inner.vol[1].set(value),
             6 => self.inner.detune[1].set(0.98 + value * 0.04),
             7 => self.inner.octave[1].set((((value - 0.5) * 3.).round()) as i8),
@@ -179,12 +174,11 @@ impl PluginParameters for Parameters {
                 .set((value * 88200.) as usize),
             16 => self.inner.cutoff_amount.set(value),
             17 => self.inner.grain_params[0].pos.set(value),
-            18 => self.inner.grain_params[0].grain_size.set(value * 10000./*.max(100.)*/),
+            18 => self.inner.grain_params[0]
+                .grain_size
+                .set(value * 10000. /*.max(100.)*/),
             19 => self.inner.vol_grain.set(value),
-            20 => self
-                .inner
-                .g_uvoices
-                .set(((value * 7.).ceil()) as usize),
+            20 => self.inner.g_uvoices.set(((value * 7.).ceil()) as usize),
             _ => (),
         }
     }
@@ -246,19 +240,16 @@ impl PluginParameters for Parameters {
     fn get_parameter_text(&self, index: i32) -> String {
         match index {
             0 => format!("{}", self.inner.pos[0].get()),
-            1 => format!("{:.3}", self.inner.vol[0].get()),
+            1 => format!("{:.3} dB", 20. * self.inner.vol[0].get().log10()),
             2 => format!("{:.3}", self.inner.detune[0].get()),
             3 => format!("{}", self.inner.octave[0].get()),
             4 => format!("{}", self.inner.pos[1].get()),
-            5 => format!("{:.3}", self.inner.vol[1].get()),
+            5 => format!("{:.3} dB", 20. * self.inner.vol[1].get().log10()),
             6 => format!("{:.3}", self.inner.detune[1].get()),
             7 => format!("{}", self.inner.octave[1].get()),
             8 => format!("{:.0}", self.inner.filter_params[0].cutoff.get()),
             9 => format!("{:.3}", self.inner.filter_params[0].res.get()),
-            10 => format!(
-                "{}",
-                self.inner.filter_params[0].poles.get() + 1
-            ),
+            10 => format!("{}", self.inner.filter_params[0].poles.get() + 1),
             11 => format!("{:.3}", self.inner.filter_params[0].drive.get()),
             12 => format!(
                 "{:.1} ms",
@@ -274,9 +265,13 @@ impl PluginParameters for Parameters {
                 self.inner.modenv_params.release_time.get() as f32 / 88.2
             ),
             16 => format!("{:.3}", self.inner.cutoff_amount.get()),
-            17 => format!("{:.3}", self.inner.grain_params[0].pos.get() * self.inner.grain_params[0].len.get() as f32 / 88.2),
+            17 => format!(
+                "{:.3}",
+                self.inner.grain_params[0].pos.get() * self.inner.grain_params[0].len.get() as f32
+                    / 88.2
+            ),
             18 => format!("{:.3}", self.inner.grain_params[0].grain_size.get() / 88.2),
-            19 => format!("{:.3}", self.inner.vol_grain.get()),
+            19 => format!("{:.3} dB", 20. * self.inner.vol_grain.get().log10()),
             20 => format!("{}", self.inner.g_uvoices.get()),
             _ => format!(""),
         }

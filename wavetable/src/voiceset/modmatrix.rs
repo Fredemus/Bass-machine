@@ -45,7 +45,7 @@ impl Default for EnvParams {
 
 #[allow(dead_code)]
 pub struct Env {
-    pub output: f32,
+    pub output: Vec<Option<f32>>,
     pub time: Vec<usize>, //time in samples
     pub note: Vec<bool>,
     pub decay_end: f32,
@@ -55,6 +55,7 @@ impl Env {
     pub fn restart_env(&mut self, voice: usize) {
         self.time[voice] = 0;
         self.note[voice] = true;
+        self.output[voice] = Some(0.);
     }
     // fn fill_attack(&mut self) {
     //     let max = (self.attack.len() as f32).powf(self.attack_slope);
@@ -79,27 +80,27 @@ impl Env {
     //         self.decay[x] = decay_end - (x as f32).powf(self.release_slope)/max;
     //     }
     // }
-    pub fn next(&mut self, voice: usize) -> Option<f32> {
-        let output: f32;
+    pub fn next(&mut self, voice: usize) {
+        let output: Option<f32>;
         if self.note[voice] {
             if self.time[voice] < self.params.attack_time.get() {
                 let max =
                     (self.params.attack_time.get() as f32).powf(self.params.attack_slope.get());
-                output = (self.time[voice] as f32).powf(self.params.attack_slope.get()) / max;
+                output = Some((self.time[voice] as f32).powf(self.params.attack_slope.get()) / max);
                 self.time[voice] += 1;
             } else if self.time[voice]
                 < self.params.attack_time.get() + self.params.decay_time.get()
             {
                 let attack_end = 1.; //could be made a parameter
                 let max = (self.params.decay_time.get() as f32).powf(self.params.decay_slope.get());
-                output = attack_end
+                output = Some(attack_end
                     - ((self.time[voice] - self.params.attack_time.get()) as f32)
                         .powf(self.params.decay_slope.get())
                         * (attack_end - self.params.sustain.get())
-                        / max;
+                        / max);
                 self.time[voice] += 1;
             } else {
-                output = self.params.sustain.get();
+                output = Some(self.params.sustain.get());
             }
         } else {
             //moves to release stage forcibly
@@ -107,7 +108,8 @@ impl Env {
                 //we set a decay end here, to make sure release is always smooth.
                 self.note[voice] = true;
                 self.time[voice] -= 1;
-                self.decay_end = self.next(voice).unwrap();
+                self.next(voice);
+                self.decay_end = self.output[voice].unwrap();
                 self.note[voice] = false;
                 self.time[voice] = self.params.attack_time.get() + self.params.decay_time.get();
             }
@@ -116,7 +118,8 @@ impl Env {
                 >= self.params.release_time.get()
             {
                 self.decay_end = 0.;
-                return None;
+                self.output[voice] = None;
+                return;
             } else {
                 let max =
                     (self.params.release_time.get() as f32).powf(self.params.release_slope.get());
@@ -126,17 +129,17 @@ impl Env {
                 } else {
                     decay_end = self.params.sustain.get();
                 }
-                output = decay_end
+                output = Some(decay_end
                     - ((self.time[voice]
                         - self.params.attack_time.get()
                         - self.params.decay_time.get()) as f32)
                         .powf(self.params.release_slope.get())
                         * decay_end
-                        / max;
+                        / max);
                 self.time[voice] += 1;
             }
         }
-        return Some(output);
+        self.output[voice] = output;
     }
 }
 // impl Iterator for Env {
@@ -178,7 +181,7 @@ impl Env {
 impl Default for Env {
     fn default() -> Env {
         Env {
-            output: 0.,
+            output: vec![Some(0.);8],
             time: vec![100000; 8],
             params: Arc::new(EnvParams::default()),
             note: vec![false; 8],

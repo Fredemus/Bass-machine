@@ -68,6 +68,7 @@ impl<'a> Synth<'a> {
         if i > 7 {
             return;
         }
+        self.voices.voice[i].reset_its();
         self.voices.vol_env.restart_env(i);
         self.voices.mod_env.restart_env(i);
         self.voices.voice[i].use_voice(note);
@@ -78,6 +79,7 @@ impl<'a> Synth<'a> {
         for i in 0..8 {
             if self.voices.voice[i].note == Some(note) {
                 self.voices.voice[i].note = None;
+                // self.voices.voice[i].reset_its();
                 self.voices.voice[i].free_voice();
                 self.voices.vol_env.note[i] = false;
                 self.voices.mod_env.note[i] = false;
