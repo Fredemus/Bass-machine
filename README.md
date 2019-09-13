@@ -4,6 +4,8 @@ WIP vst synthesizer written in rust.
 The source code is in lib.rs. Cargo.toml lists dependencies.
 
 A full wavetable oscillator has been implemented. Its SNR at 1kHz is at -80 dB, so its quality could be improved. 
+^turns out the analog emulation filters are the thing adding noise. Better SNR requires finer filter solving, so it likely won't change for a while. 
+
 The next goal is to add more features.
 
 A granular synthesis like oscillator has been implemented.
@@ -13,16 +15,13 @@ Pole mixing could be an easy way of adding some multi filters: https://mutable-i
 
 Envelopes are implemented, but they could potentially be more efficient.
 
-File paths for wavetables should be gotten relative to source file so other people can actually build this lol
-
-
 
 Features planned:
-* Unison voices (done on graintable. Really could use optimization)
+* Stereo processing. Mostly for unison/potential effects
+* Unison voices for wavetable oscillators
 * Modulation framework (envelopes done, next step adding destinations)
-* filtering ✓
-* fine and coarse ✓ tune
-* octave switches ✓
+* Nonlinear state variable filter (almost done)
+
 
 
 
