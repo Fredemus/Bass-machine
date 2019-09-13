@@ -14,17 +14,15 @@ use crate::util::{AtomicF32, AtomicI8, AtomicUsize};
 
         should probably quantise grain pos to avoid accidental fm lol
         implement unison
+        implement more filter modes
 
-        avoid vec of vec
 
         small alias problem now. SNR at 1 kHz is about -80 dB.
         Most likely caused by quality of interpolation algorithm
 
-        Optimization ideas : flatten vectors(possibly big improvement, way fewer cache misses.)
+        flatten vectors(possibly big improvement, way fewer cache misses.)
+
         iterate instead of index where it makes sense (should be ~20% faster),
-        possibly change some vectors to arrays (could be done instead of flattening, easier).
-        the actual samples per waveform, and number of mip maps is known at compile-time.
-        Number of waveforms is not
 
 */
 pub fn mip_offset(mip: usize, len: usize) -> usize {
@@ -63,7 +61,7 @@ pub struct Parameters {
 
 #[allow(dead_code)]
 pub struct Voiceset<'a> {
-    pub(crate) oscs: Vec<interp::WaveTable<'a>>,
+    pub oscs: Vec<interp::WaveTable<'a>>,
     pub(crate) g_oscs: Vec<interp::GrainTable<'a>>,
     //vector of filters, since each voice will need its own filter when envelopes are added
     pub filter: Vec<filter::LadderFilter>,
@@ -85,12 +83,11 @@ impl<'a> Voiceset<'a> {
         for _i in 0..self.oscs[0].amt_oversample {
             let mut unfiltered_new = 0.;
             for voice in 0..8 {
-                
                 // this if-condition needs to be happened to something that happens once instead of continually
                 if self.vol_env.output[voice] == None {
                     //if vol_env is none for the voice, it's done outputting
                     //break;
-                // add the output of the active voices together
+                    // add the output of the active voices together
                 } else {
                     let vol_mod = self.vol_env.output[voice].unwrap();
                     self.vol_env.next(voice);
@@ -124,7 +121,7 @@ impl<'a> Voiceset<'a> {
                     unfiltered_new += self.filter[voice].vout[self.filter[0].params.poles.get()];
                 }
             }
-            //----------- IIR FILTERING ------------------// 
+            //----------- IIR FILTERING ------------------//
             output = self.poly_iir.process(unfiltered_new);
             //----------- FIR FILTERING BELOW ------------//
             // //removes the sample that just got filtered
@@ -133,7 +130,7 @@ impl<'a> Voiceset<'a> {
             // self.interp_buffer.push_back(unfiltered_new);
         }
         //only every 2nd sample needs to be output for downsampling. Therefore only every 2nd sample
-        //needs to be filtered
+        //needs to be filtered with fir
         // output = self._single_sample_convolve(&self.oscs[0].downsample_fir);
         return output;
     }
@@ -176,26 +173,25 @@ impl<'a> Voiceset<'a> {
         // Optimal 2x (4-point, 3rd-order) (z-form)
         // return ((c3*z+c2)*z+c1)*z+c0;
         //find the best mip to do the interpolation from. could be moved elsewhere to avoid calling excessively
-        let mip = (self.voice[i].wavetabe_mip as i8 + self.params.octave[j].get()) as usize;
+        let mip = (self.voice[i].wavetable_mip as i8 + self.params.octave[j].get()) as usize;
+        let mip_offset = mip_offset(mip, self.oscs[j].len);
         let temp: f32;
         let it: usize;
         //x is the placement of the sample compared to the last one, or the slope
         let x = ratio;
-        //self.new_len = findlen as usize;
         //let z = x - 0.5;
         let z_pos; //= z.fract();
-        it = self.voice[i].wave_its[j][0].floor() as usize; // have a way to use each unison it in use
+        it = self.voice[i].wave_its[j][0].floor() as usize
+            + mip_offset
+            + self.oscs[j].wave_len * self.params.pos[j].get() / 2usize.pow(mip as u32); // have a way to use each unison it in use
         z_pos = self.voice[i].wave_its[j][0].fract(); // should z_pos have a -0.5?
-        temp = ((self.oscs[j].c3[mip][self.params.pos[j].get()][it] * z_pos
-            + self.oscs[j].c2[mip][self.params.pos[j].get()][it])
+        temp = ((self.oscs[j].c3[it] * z_pos + self.oscs[j].c2[it]) * z_pos + self.oscs[j].c1[it])
             * z_pos
-            + self.oscs[j].c1[mip][self.params.pos[j].get()][it])
-            * z_pos
-            + self.oscs[j].c0[mip][self.params.pos[j].get()][it];
+            + self.oscs[j].c0[it];
         self.voice[i].wave_its[j][0] += x;
-        if self.voice[i].wave_its[j][0] > (self.oscs[j].mips[mip][0].len()) as f32 {
+        if self.voice[i].wave_its[j][0] > (self.oscs[j].wave_len / 2usize.pow(mip as u32)) as f32 {
             //loop back around zero.
-            self.voice[i].wave_its[j][0] -= (self.oscs[j].mips[mip][0].len()) as f32;
+            self.voice[i].wave_its[j][0] -= (self.oscs[j].wave_len / 2usize.pow(mip as u32)) as f32;
         }
         return temp;
     }
@@ -236,7 +232,7 @@ impl<'a> Default for Voiceset<'a> {
         let mut g_oscs = vec![interp::GrainTable::default(); 2];
         let g_params: Vec<Arc<interp::GrainParams>> =
             g_oscs.iter().map(|g| g.params.clone()).collect();
-        g_oscs[0].change_table(&tables[0]);
+        g_oscs[0].change_table(&tables[0]); //FIXME: graintable should have a more interesting default wave
         let mut poly_iir = resampling::HalfbandFilter::default();
         //sets the halfband filter to 8th order steep
         poly_iir.setup(8, true);
@@ -286,7 +282,7 @@ pub struct Voice {
     g_ratio_offsets: Vec<f32>,
     pub ratio: f32,
     pub grain_ratio: f32,
-    pub(crate) wavetabe_mip: usize,
+    pub(crate) wavetable_mip: usize,
     pub(crate) grain_mip: usize,
     // pos gives the current wave
     pub note: Option<u8>,
@@ -308,6 +304,7 @@ impl Voice {
         return self.free;
     }
     pub fn use_voice(&mut self, note: u8) {
+        self.reset_its();
         self.free = false;
         self.note = Some(note);
         self.time = 0;
@@ -327,7 +324,7 @@ impl Default for Voice {
             grain_its: vec![0.; 7],
             g_pos_offsets: vec![1., 1.012, 0.988, 1.005, 0.994, 1.008, 0.992],
             g_ratio_offsets: vec![1., 1.001, 0.999, 1.002, 0.998, 1.004, 0.996],
-            wavetabe_mip: 0,
+            wavetable_mip: 0,
             grain_mip: 0,
             ratio: 1.,
             grain_ratio: 1.,

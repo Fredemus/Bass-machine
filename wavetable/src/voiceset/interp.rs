@@ -19,6 +19,7 @@ pub fn mip_offset(mip: usize, len: usize) -> usize {
         7 => 1.984375,
         8 => 1.9921875,
         9 => 1.99609375,
+        10 => 1.998046875,
         _ => 0.,
     };
     (len as f32 * amount) as usize
@@ -135,12 +136,7 @@ impl<'a> GrainTable<'a> {
         self.c1.resize(self.source_y.len() * 2, 0.);
         self.c2.resize(self.source_y.len() * 2, 0.);
         self.c3.resize(self.source_y.len() * 2, 0.);
-        // for i in 0..self.mip_levels {
-        //     self.c0[i].resize(self.mip_len(i), 0.);
-        //     self.c1[i].resize(self.mip_len(i), 0.);
-        //     self.c2[i].resize(self.mip_len(i), 0.);
-        //     self.c3[i].resize(self.mip_len(i), 0.);
-        // }
+
         for n in 0..self.mip_levels {
             //n represent mip-map levels
             for j in 1..self.mip_len(n) - 2 {
@@ -262,56 +258,68 @@ impl<'a> Default for GrainTable<'a> {
 #[derive(Clone)]
 pub struct WaveTable<'a> {
     source_y: Vec<f32>,
-    pub(crate) waveforms: Vec<Vec<f32>>,
+    pub(crate) waveforms: Vec<f32>,
+    /// the numbe of waveforms in the current wavetable
     pub(crate) wave_number: usize,
     pub wave_len: usize,
     pub(crate) len: usize,
     pub(crate) amt_oversample: usize,
 
-    pub c0: Vec<Vec<Vec<f32>>>,
-    pub c1: Vec<Vec<Vec<f32>>>,
-    pub c2: Vec<Vec<Vec<f32>>>,
-    pub c3: Vec<Vec<Vec<f32>>>,
+    pub c0: Vec<f32>,
+    pub c1: Vec<f32>,
+    pub c2: Vec<f32>,
+    pub c3: Vec<f32>,
 
     pub(crate) upsample_fir: &'a [f32],
     pub(crate) downsample_fir: &'a [f32],
-    pub mips: Vec<Vec<Vec<f32>>>,
+    pub mips: Vec<f32>,
     mip_levels: usize,
 }
 #[allow(dead_code)]
 impl<'a> WaveTable<'a> {
     pub fn change_table(&mut self, table: &Table) {
         self.source_y = table.clone().load().unwrap();
-        self.slice();
+        // self.slice();
+        self.len = self.source_y.len();
+        self.wave_len = 2048;
+        self.wave_number = self.len / self.wave_len;
         self.oversample(2);
         self.mip_map();
         self.optimal_coeffs();
+    }
+    pub fn mip_len(&self, mip: usize) -> usize {
+        (self.source_y.len() as f32 / 2f32.powi(mip as i32)) as usize
     }
     pub(crate) fn oversample(&mut self, ratio: usize) {
         self.amt_oversample = ratio;
         //resize slices to fit the new length
         self.wave_len *= ratio;
-        for i in 0..self.wave_number {
-            self.waveforms[i].resize(self.wave_len, 0.);
-        }
+
+        // for i in 0..self.wave_number {
+        //     self.waveforms[i].resize(self.wave_len, 0.);
+        // }
+        self.source_y.resize(self.source_y.len() * ratio, 0.);
         let mut temp = vec![0.];
-        temp.resize(self.wave_len, 0.);
-        for i in 0..self.wave_number {
-            //fills temp with an oversampled version of current slice
-            for j in 0..self.wave_len {
-                if j % ratio == 0 {
-                    temp[j] = self.waveforms[i][j / ratio];
-                } else {
-                    temp[j] = 0.;
-                }
+        temp.resize(self.source_y.len(), 0.);
+        for j in 0..(self.source_y.len()) {
+            if j % ratio == 0 {
+                temp[j] = self.source_y[j / ratio];
+            } else {
+                temp[j] = 0.;
             }
-            self.waveforms[i] = temp.to_vec();
         }
+        self.source_y = temp.to_vec();
         //static_convolve zero-stuffed vector with coefficients (sinc) of a fir, to remove mirror images above new_Fs/4
-        //upsample_fir could be turned into a polyphase implementation, to halve number of clock cycles needed
+        //upsample_fir could be turned into a polyphase implementation, to halve number of multiplications needed
+        let mut temp: Vec<f32> = Vec::new();
+        //temp.resize(self.source_y.len(), 0.);
         for i in 0..self.wave_number {
-            self.waveforms[i] = self.static_convolve(self.upsample_fir, &self.waveforms[i]);
+            temp.append(&mut self.static_convolve(
+                self.upsample_fir,
+                &(&self.source_y[i * self.wave_len..(i + 1) * self.wave_len]).to_vec(),
+            ));
         }
+        self.source_y = temp;
     }
     pub(crate) fn downsample_2x(&self, signal: &Vec<f32>) -> Vec<f32> {
         //first we filter the signal to downsample 2x
@@ -325,23 +333,23 @@ impl<'a> WaveTable<'a> {
     }
 
     pub(crate) fn mip_map(&mut self) {
-        self.mips.resize(
-            self.mip_levels,
-            vec![vec![0.; self.wave_len]; self.wave_number],
-        );
-
-        //fill first layer with self.waveforms
-        for i in 0..self.wave_number {
-            self.mips[0][i] = self.waveforms[i].to_vec();
-        }
-        //fills the mip_levels with continually more downsampled vectors
-        for i in 1..self.mip_levels {
-            for j in 0..self.wave_number {
-                self.mips[i][j] = self.downsample_2x(&self.mips[i - 1][j]);
+        //fill first layer with self.source_y
+        let len = self.source_y.len();
+        let mut temp: Vec<f32> = self.source_y.clone();
+        // fills the mip_levels with continually more downsampled vectors
+        for j in 0..self.mip_levels {
+            for i in 0..self.wave_number {
+                temp.append(
+                    &mut self.downsample_2x(
+                        &(&temp[i * self.wave_len / 2usize.pow(j as u32) + mip_offset(j, len)
+                            ..(i + 1) * self.wave_len / 2usize.pow(j as u32) + mip_offset(j, len)])
+                            .to_vec(),
+                    ),
+                );
             }
         }
+        self.mips = temp;
     }
-    //check for off-by-ones at some point. self.len should be fine instead of len_x
     pub(crate) fn hermite_coeffs(&mut self) {
         // self.len = self.source_y.len();
         // let new_wave_len = self.wave_len *self.amt_oversample;
@@ -401,92 +409,91 @@ impl<'a> WaveTable<'a> {
     }
     //slices the read .wav into individual waveforms.
     //source_y could be avoided, by letting it take a reference to the read .wav instead
-    pub(crate) fn slice(&mut self) {
-        self.len = self.source_y.len();
-        self.wave_len = 2048;
-        self.wave_number = self.len / self.wave_len;
-        self.waveforms.resize(self.wave_number, vec![0.; 2048]);
-        for i in 0..self.wave_number {
-            for j in 0..self.wave_len {
-                self.waveforms[i][j] = self.source_y[j + self.wave_len * i];
-            }
-        }
-    }
+    // pub(crate) fn slice(&mut self) {
+    //     self.len = self.source_y.len();
+    //     self.wave_len = 2048;
+    //     self.wave_number = self.len / self.wave_len;
+    //     self.waveforms.resize(self.wave_number, vec![0.; 2048]);
+    //     for i in 0..self.wave_number {
+    //         for j in 0..self.wave_len {
+    //             self.waveforms[i][j] = self.source_y[j + self.wave_len * i];
+    //         }
+    //     }
+    // }
+    // FIXME: needs to handle waveforms separately (another layer of for loops)
     pub(crate) fn optimal_coeffs(&mut self) {
         self.len = self.source_y.len();
-        let new_wave_len = self.wave_len * self.amt_oversample;
-        let mut even1;
+        let len = self.len;
+        // let new_wave_len = self.wave_len;
+        let mut even1: f32;
         let mut even2: f32;
         let mut odd1: f32;
         let mut odd2: f32;
-        self.c0.resize(
-            self.mip_levels,
-            vec![vec![0.; new_wave_len]; self.wave_number],
-        );
-        self.c1.resize(
-            self.mip_levels,
-            vec![vec![0.; new_wave_len]; self.wave_number],
-        );
-        self.c2.resize(
-            self.mip_levels,
-            vec![vec![0.; new_wave_len]; self.wave_number],
-        );
-        self.c3.resize(
-            self.mip_levels,
-            vec![vec![0.; new_wave_len]; self.wave_number],
-        );
+        self.c0.resize(self.source_y.len() * 2, 0.);
+        self.c1.resize(self.source_y.len() * 2, 0.);
+        self.c2.resize(self.source_y.len() * 2, 0.);
+        self.c3.resize(self.source_y.len() * 2, 0.);
 
-        for n in 0..self.mip_levels {
+        for _n in 0..self.mip_levels {
             //n represent mip-map levels
-            for i in 0..self.wave_number {
-                for j in 1..self.mips[n][0].len() - 2 {
-                    even1 = self.mips[n][i][j + 1] + self.mips[n][i][j + 0];
-                    odd1 = self.mips[n][i][j + 1] - self.mips[n][i][j + 0];
-                    even2 = self.mips[n][i][j + 2] + self.mips[n][i][j - 1];
-                    odd2 = self.mips[n][i][j + 2] - self.mips[n][i][j - 1];
-                    self.c0[n][i][j] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
-                    self.c1[n][i][j] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
-                    self.c2[n][i][j] = even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
-                    self.c3[n][i][j] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
+            for _i in 0..self.wave_number {
+                for j in 1..self.wave_len / 2usize.pow(_n as u32) - 2 {
+                    let i = _i * self.wave_len / 2usize.pow(_n as u32);
+                    let n = mip_offset(_n, len);
+
+                    even1 = self.mips[n + i + j + 1] + self.mips[n + i + j + 0];
+                    odd1 = self.mips[n + i + j + 1] - self.mips[n + i + j + 0];
+                    even2 = self.mips[n + i + j + 2] + self.mips[n + i + j - 1];
+                    odd2 = self.mips[n + i + j + 2] - self.mips[n + i + j - 1];
+                    self.c0[n + i + j] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
+                    self.c1[n + i + j] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
+                    self.c2[n + i + j] =
+                        even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
+                    self.c3[n + i + j] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
                 }
             }
         }
         //makes sure the start of waveforms are handled properly
-
-        for n in 0..self.mip_levels {
-            let j = self.mips[n][0].len();
-            for i in 0..self.wave_number {
-                even1 = self.mips[n][i][0 + 1] + self.mips[n][i][0 + 0];
-                odd1 = self.mips[n][i][0 + 1] - self.mips[n][i][0 + 0];
-                even2 = self.mips[n][i][0 + 2] + self.mips[n][i][j - 1];
-                odd2 = self.mips[n][i][0 + 2] - self.mips[n][i][j - 1];
-                self.c0[n][i][0] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
-                self.c1[n][i][0] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
-                self.c2[n][i][0] = even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
-                self.c3[n][i][0] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
+        for _n in 0..self.mip_levels {
+            let j = self.wave_len / 2usize.pow(_n as u32);
+            for _i in 0..self.wave_number {
+                let i = _i * self.wave_len / 2usize.pow(_n as u32);
+                let n = mip_offset(_n, len);
+                even1 = self.mips[n + i + 0 + 1] + self.mips[n + i + 0 + 0];
+                odd1 = self.mips[n + i + 0 + 1] - self.mips[n + i + 0 + 0];
+                even2 = self.mips[n + i + 0 + 2] + self.mips[n + i + j - 1];
+                odd2 = self.mips[n + i + 0 + 2] - self.mips[n + i + j - 1];
+                self.c0[n + i + 0] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
+                self.c1[n + i + 0] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
+                self.c2[n + i + 0] = even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
+                self.c3[n + i + 0] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
             }
         }
         //makes sure the end of waveforms are handled properly
-        for n in 0..self.mip_levels {
-            let j = self.mips[n][0].len();
-            for i in 0..self.wave_number {
-                even1 = self.mips[n][i][j - 1] + self.mips[n][i][j - 2];
-                odd1 = self.mips[n][i][j - 1] - self.mips[n][i][j - 2];
-                even2 = self.mips[n][i][0] + self.mips[n][i][j - 3];
-                odd2 = self.mips[n][i][0] - self.mips[n][i][j - 3];
-                self.c0[n][i][j - 2] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
-                self.c1[n][i][j - 2] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
-                self.c2[n][i][j - 2] = even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
-                self.c3[n][i][j - 2] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
+        for _n in 0..self.mip_levels {
+            let j = self.wave_len / 2usize.pow(_n as u32);
+            for _i in 0..self.wave_number {
+                let i = _i * self.wave_len / 2usize.pow(_n as u32);
+                let n = mip_offset(_n, len);
+                even1 = self.mips[n + i + j - 1] + self.mips[n + i + j - 2];
+                odd1 = self.mips[n + i + j - 1] - self.mips[n + i + j - 2];
+                even2 = self.mips[n + i + 0] + self.mips[n + i + j - 3];
+                odd2 = self.mips[n + i + 0] - self.mips[n + i + j - 3];
+                self.c0[n + i + j - 2] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
+                self.c1[n + i + j - 2] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
+                self.c2[n + i + j - 2] =
+                    even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
+                self.c3[n + i + j - 2] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
 
-                even1 = self.mips[n][i][0] + self.mips[n][i][j - 1];
-                odd1 = self.mips[n][i][0] - self.mips[n][i][j - 1];
-                even2 = self.mips[n][i][1] + self.mips[n][i][j - 2];
-                odd2 = self.mips[n][i][1] - self.mips[n][i][j - 2];
-                self.c0[n][i][j - 1] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
-                self.c1[n][i][j - 1] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
-                self.c2[n][i][j - 1] = even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
-                self.c3[n][i][j - 1] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
+                even1 = self.mips[n + i + 0] + self.mips[n + i + j - 1];
+                odd1 = self.mips[n + i + 0] - self.mips[n + i + j - 1];
+                even2 = self.mips[n + i + 1] + self.mips[n + i + j - 2];
+                odd2 = self.mips[n + i + 1] - self.mips[n + i + j - 2];
+                self.c0[n + i + j - 1] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
+                self.c1[n + i + j - 1] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
+                self.c2[n + i + j - 1] =
+                    even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
+                self.c3[n + i + j - 1] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
             }
         }
     }

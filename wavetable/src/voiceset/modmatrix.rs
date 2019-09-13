@@ -29,7 +29,7 @@ impl Default for EnvParams {
             decay_time: AtomicUsize::new(8820),
             sustain: AtomicF32::new(1.0),
             release_time: AtomicUsize::new(882),
-            attack_slope: AtomicF32::new(0.6),
+            attack_slope: AtomicF32::new(1.2),
             decay_slope: AtomicF32::new(0.5),
             release_slope: AtomicF32::new(0.6),
             // attack_time: 882, //882 samples is 20ms
@@ -93,11 +93,13 @@ impl Env {
             {
                 let attack_end = 1.; //could be made a parameter
                 let max = (self.params.decay_time.get() as f32).powf(self.params.decay_slope.get());
-                output = Some(attack_end
-                    - ((self.time[voice] - self.params.attack_time.get()) as f32)
-                        .powf(self.params.decay_slope.get())
-                        * (attack_end - self.params.sustain.get())
-                        / max);
+                output = Some(
+                    attack_end
+                        - ((self.time[voice] - self.params.attack_time.get()) as f32)
+                            .powf(self.params.decay_slope.get())
+                            * (attack_end - self.params.sustain.get())
+                            / max,
+                );
                 self.time[voice] += 1;
             } else {
                 output = Some(self.params.sustain.get());
@@ -129,13 +131,15 @@ impl Env {
                 } else {
                     decay_end = self.params.sustain.get();
                 }
-                output = Some(decay_end
-                    - ((self.time[voice]
-                        - self.params.attack_time.get()
-                        - self.params.decay_time.get()) as f32)
-                        .powf(self.params.release_slope.get())
-                        * decay_end
-                        / max);
+                output = Some(
+                    decay_end
+                        - ((self.time[voice]
+                            - self.params.attack_time.get()
+                            - self.params.decay_time.get()) as f32)
+                            .powf(self.params.release_slope.get())
+                            * decay_end
+                            / max,
+                );
                 self.time[voice] += 1;
             }
         }
@@ -181,7 +185,7 @@ impl Env {
 impl Default for Env {
     fn default() -> Env {
         Env {
-            output: vec![Some(0.);8],
+            output: vec![Some(0.); 8],
             time: vec![100000; 8],
             params: Arc::new(EnvParams::default()),
             note: vec![false; 8],

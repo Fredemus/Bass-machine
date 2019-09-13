@@ -29,19 +29,10 @@ fn _process_note_samples_stereo(notes: &[u8], samples: usize) -> [Vec<f32>; 2] {
 // has to be run with cargo test -- --nocapture or the println! will be suppressed
 #[test]
 fn test_variable_value() {
-    let mut plugin = Synth::default();
-    println!(
-        "value of the len is {:?}",
-        plugin.voices.params.grain_params[0].len.get()
-    );
-    println!(
-        "vlue of cutoff is  {}",
-        plugin.voices.params.filter_params[0].cutoff.get()
-    );
+    let _plugin = Synth::default();
 }
 
 #[test]
-#[ignore]
 fn test_process_mono() {
     for notes in SAMPLES.iter() {
         let stem = format!(
@@ -56,6 +47,7 @@ fn test_process_mono() {
         println!("{}", file);
         let reader = hound::WavReader::open(file).unwrap();
         let [output] = process_note_samples_mono(notes, 44100);
+
         assert!(reader
             .into_samples::<f32>()
             .map(|sample| sample.expect("failed to decode WAV stream"))

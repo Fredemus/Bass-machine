@@ -67,8 +67,8 @@ pub struct HalfbandFilter {
 
 impl HalfbandFilter {
     pub fn setup(&mut self, order: usize, steep: bool) {
-        let a_coefficients : Vec<f32>;
-        let b_coefficients : Vec<f32>;
+        let a_coefficients: Vec<f32>;
+        let b_coefficients: Vec<f32>;
 
         if steep == true {
             if order == 12
@@ -220,21 +220,21 @@ impl HalfbandFilter {
             }
         }
         let mut allpasses_a = [Allpass::default(); 6];
-        for i in 0..order/2 {
+        for i in 0..order / 2 {
             allpasses_a[i].a = a_coefficients[i];
         }
         let filter_a = AllpassCascade {
-            num_filters: order/2,
+            num_filters: order / 2,
             allpasses: allpasses_a,
         };
         self.filter_a = filter_a;
 
         let mut allpasses_b = [Allpass::default(); 6];
-        for i in 0..order/2 {
+        for i in 0..order / 2 {
             allpasses_b[i].a = b_coefficients[i];
         }
         let filter_b = AllpassCascade {
-            num_filters: order/2,
+            num_filters: order / 2,
             allpasses: allpasses_b,
         };
         self.filter_b = filter_b;
@@ -268,19 +268,19 @@ impl Default for HalfbandFilter {
             0.9599687404800694,
         ];
         let mut allpasses_a = [Allpass::default(); 6];
-        for i in 0..12/2 {
+        for i in 0..12 / 2 {
             allpasses_a[i].a = a_coefficients[i];
         }
         let filter_a = AllpassCascade {
-            num_filters: 12/2,
+            num_filters: 12 / 2,
             allpasses: allpasses_a,
         };
         let mut allpasses_b = [Allpass::default(); 6];
-        for i in 0..12/2 {
+        for i in 0..12 / 2 {
             allpasses_b[i].a = b_coefficients[i];
         }
         let filter_b = AllpassCascade {
-            num_filters: 12/2,
+            num_filters: 12 / 2,
             allpasses: allpasses_b,
         };
         HalfbandFilter {
@@ -288,7 +288,5 @@ impl Default for HalfbandFilter {
             filter_b: filter_b,
             old_out: 0.0,
         }
-
     }
 }
-

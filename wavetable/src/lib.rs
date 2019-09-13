@@ -30,13 +30,11 @@ impl<'a> Synth<'a> {
         // return ratio between desired pitch and standard
         let diff = note - 17;
         let mip = diff as usize / 12;
-        self.voices.voice[i].wavetabe_mip = mip;
+        self.voices.voice[i].wavetable_mip = mip;
         let downsampled_ratio = 2f32.powi(mip as i32);
-        //standard / pn
         (pn / downsampled_ratio) / standard
     }
     fn find_ratio_grain(&mut self, note: u8, i: usize) -> f32 {
-        //let standard = self.sample_rate * 2. / self.voices.g_oscs[0].grain_size;
         let pn = 440f32 * (2f32.powf(1. / 12.)).powi(note as i32 - 69);
         //return ratio between desired pitch and standard
         let diff = note - 17;
@@ -68,10 +66,10 @@ impl<'a> Synth<'a> {
         if i > 7 {
             return;
         }
-        self.voices.voice[i].reset_its();
+        // setup of the voice
+        self.voices.voice[i].use_voice(note);
         self.voices.vol_env.restart_env(i);
         self.voices.mod_env.restart_env(i);
-        self.voices.voice[i].use_voice(note);
         self.voices.voice[i].ratio = self.find_ratio(note, i);
         self.voices.voice[i].grain_ratio = self.find_ratio_grain(note, i);
     }
@@ -79,7 +77,6 @@ impl<'a> Synth<'a> {
         for i in 0..8 {
             if self.voices.voice[i].note == Some(note) {
                 self.voices.voice[i].note = None;
-                // self.voices.voice[i].reset_its();
                 self.voices.voice[i].free_voice();
                 self.voices.vol_env.note[i] = false;
                 self.voices.mod_env.note[i] = false;
@@ -104,7 +101,6 @@ impl<'a> Synth<'a> {
 
 impl<'a> Default for Synth<'a> {
     fn default() -> Synth<'a> {
-        //let voiceset : interp::Voiceset::Default::default()
         let mut a = Synth {
             note_duration: 0.0,
             sample_rate: 44100.,
@@ -113,7 +109,7 @@ impl<'a> Default for Synth<'a> {
             },
             wt_len: vec![7, 7],
         };
-        a.prep_buffer(); //first call fills the buffer with 0's.
+        a.prep_buffer();
         a.wt_len[0] = a.voices.oscs[0].len / (2048 * a.voices.oscs[0].amt_oversample);
         a.wt_len[1] = a.voices.oscs[1].len / (2048 * a.voices.oscs[1].amt_oversample);
         return a;
@@ -122,8 +118,8 @@ impl<'a> Default for Synth<'a> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
+    // #[test]
+    // fn it_works() {
+    //     assert_eq!(2 + 2, 4);
+    // }
 }
