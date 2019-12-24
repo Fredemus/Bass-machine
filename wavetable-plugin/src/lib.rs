@@ -1,15 +1,17 @@
 /*
-
+    This project is more meant to suit my personal bass needs, since all synths I've tried fall short in one way or another.
+    Goal for now is 4 wavetable oscillators that can FM each other however you want them to
     TODO:
-    test graintable
-    figure out envelopes
-    move fir filters somewhere sensible.
-    Implement unison
+    Changing unison spread
+    Remove filter envelope
+    Glide
+    Get FM going
+    Figure out the update to vst 0.2.0
+    File system
+    More wavetables
+    Parameter smoothing
 
-
-    only way i can see to avoid groupdelay from fir is to fir filter each separately and
-
-    Optimisation. look into optimising single_conv (polyphase) or single_interp
+    Optimisation. look into doing simd on the oscillators sometime
     Licensing. Look into MIT and copyleft
     https://docs.rs/nalgebra/0.3.2/nalgebra/struct.DVec3.html
     https://docs.rs/basic_dsp/0.2.0/basic_dsp/
@@ -49,22 +51,19 @@ impl<'a> Default for Synth<'a> {
     }
 }
 
-//for gui thread
-//use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-
 impl<'a> Plugin for Synth<'a> {
     fn set_sample_rate(&mut self, rate: f32) {
         self.synth.sample_rate = rate;
     }
     fn get_info(&self) -> Info {
         Info {
-            name: "WaveTable".to_string(),
-            unique_id: 9264,
+            name: "BassMachine".to_string(),
+            unique_id: 9265,
             inputs: 0,
             outputs: 1,
             category: Category::Synth,
-            parameters: 21,
+            parameters: 18,
             ..Default::default()
         }
     }
@@ -114,10 +113,7 @@ impl PluginParameters for Parameters {
             14 => self.inner.modenv_params.sustain.get(),
             15 => self.inner.modenv_params.release_time.get() as f32 / 88200.,
             16 => self.inner.cutoff_amount.get(),
-            17 => self.inner.grain_params[0].pos.get(),
-            18 => self.inner.grain_params[0].grain_size.get() / 10000.,
-            19 => self.inner.vol_grain.get(),
-            20 => self.inner.g_uvoices.get() as f32 / 7.,
+            17 => self.inner.g_uvoices.get() as f32 / 7.,
             _ => 0.0,
         }
     }
@@ -173,12 +169,7 @@ impl PluginParameters for Parameters {
                 .release_time
                 .set((value * 88200.) as usize),
             16 => self.inner.cutoff_amount.set(value),
-            17 => self.inner.grain_params[0].pos.set(value),
-            18 => self.inner.grain_params[0]
-                .grain_size
-                .set(value * 10000. /*.max(100.)*/),
-            19 => self.inner.vol_grain.set(value),
-            20 => self.inner.g_uvoices.set(((value * 7.).ceil()) as usize),
+            17 => self.inner.g_uvoices.set(((value * 6.).ceil()) as usize + 1),
             _ => (),
         }
     }
@@ -201,10 +192,7 @@ impl PluginParameters for Parameters {
             14 => "sustain level".to_string(),
             15 => "release time".to_string(),
             16 => "cutoff amount".to_string(),
-            17 => "grain pos".to_string(),
-            18 => "grain size".to_string(),
-            19 => "grain osc volume".to_string(),
-            20 => "grain unison".to_string(),
+            17 => "grain unison".to_string(),
             //4 => "Wet level".to_string(),
             _ => "".to_string(),
         }
@@ -228,10 +216,7 @@ impl PluginParameters for Parameters {
             14 => "%".to_string(),
             15 => "ms".to_string(),
             16 => "%".to_string(),
-            17 => "ms".to_string(),
-            18 => "ms".to_string(),
-            19 => "%".to_string(),
-            20 => "voices".to_string(),
+            17 => "voices".to_string(),
             _ => "".to_string(),
         }
     }
@@ -265,14 +250,7 @@ impl PluginParameters for Parameters {
                 self.inner.modenv_params.release_time.get() as f32 / 88.2
             ),
             16 => format!("{:.3}", self.inner.cutoff_amount.get()),
-            17 => format!(
-                "{:.3}",
-                self.inner.grain_params[0].pos.get() * self.inner.grain_params[0].len.get() as f32
-                    / 88.2
-            ),
-            18 => format!("{:.3}", self.inner.grain_params[0].grain_size.get() / 88.2),
-            19 => format!("{:.3} dB", 20. * self.inner.vol_grain.get().log10()),
-            20 => format!("{}", self.inner.g_uvoices.get()),
+            17 => format!("{}", self.inner.g_uvoices.get()),
             _ => format!(""),
         }
     }

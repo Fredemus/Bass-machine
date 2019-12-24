@@ -1,5 +1,5 @@
 [package]
-name = "wave_table"
+name = "Bass-machine"
 version = "0.2.0"
 authors = ["rasmu"]
 edition = "2018"
@@ -12,5 +12,5 @@ hound = "3.4.0"
 path = "../wavetable"
 
 [lib]
-name = "wave_table"
+name = "bass_machine"
 crate-type = ["cdylib"]

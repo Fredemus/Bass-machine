@@ -1,4 +1,3 @@
-//use vst::util::AtomicFloat;
 //used for handling .wav files
 extern crate hound;
 
@@ -16,14 +15,14 @@ pub struct Synth<'a> {
 
 impl<'a> Synth<'a> {
     // fills a buffer we can use for fir filtering.
-    pub(crate) fn prep_buffer(&mut self) {
-        self.voices
-            .interp_buffer
-            .resize(self.voices.oscs[0].downsample_fir.len() + 1, 0.);
-        for i in 0..self.voices.oscs[0].downsample_fir.len() - 1 {
-            self.voices.interp_buffer[i] = 0.;
-        }
-    }
+    // pub(crate) fn prep_buffer(&mut self) {
+    //     self.voices
+    //         .interp_buffer
+    //         .resize(self.voices.oscs[0].downsample_fir.len() + 1, 0.);
+    //     for i in 0..self.voices.oscs[0].downsample_fir.len() - 1 {
+    //         self.voices.interp_buffer[i] = 0.;
+    //     }
+    // }
     fn find_ratio(&mut self, note: u8, i: usize) -> f32 {
         let standard = 21.533203125; // default wavetable pitch
         let pn = 440f32 * (2f32.powf(1. / 12.)).powi(note as i32 - 69);
@@ -109,7 +108,6 @@ impl<'a> Default for Synth<'a> {
             },
             wt_len: vec![7, 7],
         };
-        a.prep_buffer();
         a.wt_len[0] = a.voices.oscs[0].len / (2048 * a.voices.oscs[0].amt_oversample);
         a.wt_len[1] = a.voices.oscs[1].len / (2048 * a.voices.oscs[1].amt_oversample);
         return a;
