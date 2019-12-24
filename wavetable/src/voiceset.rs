@@ -10,11 +10,7 @@ use crate::util::{AtomicF32, AtomicI8, AtomicUsize};
 
 /*
         Todo:
-
-        should probably quantise grain pos to avoid accidental fm lol
         implement more filter modes
-
-
         iterate instead of index where it makes sense (should be ~20% faster),
 
 */
@@ -38,7 +34,8 @@ pub fn mip_offset(mip: usize, len: usize) -> usize {
 pub struct Parameters {
     //tweakable synth parameters
     pub g_uvoices: AtomicUsize,
-    pub pitch_offsets: Vec<AtomicF32>,
+    pitch_offsets: Vec<AtomicF32>,
+    pub pitch_offs_val: AtomicF32,
     pub vol: Vec<AtomicF32>,
     pub vol_grain: AtomicF32,
     pub detune: Vec<AtomicF32>,
@@ -50,6 +47,19 @@ pub struct Parameters {
     //other stuff
     pub wave_number1: usize,
     pub wave_number2: usize,
+}
+impl Parameters {
+    // FIXME: Does this make sense when using fewer voices?
+    pub fn change_spread(&self, value: f32) {
+        self.pitch_offs_val.set(value);
+        // limit val to go between 0 to 0.05
+        let val = value * 0.008;
+        // spreading every second voice the other way from center
+        for i in (1..8).step_by(2) {
+            self.pitch_offsets[i].set(val * (i) as f32 + 1.);
+            self.pitch_offsets[i+1].set(-val * (i) as f32 + 1.);
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -88,11 +98,12 @@ impl<'a> Voiceset<'a> {
                     let mut temp = 0.;
                     //the 2 oscillators
                     for osc in 0..2 {
+                        // FIXME: voices should be chosen around the middle voice (number 4)
                         for u_voice in 0..self.params.g_uvoices.get() {
                             temp += self.single_interp(
                                 self.voice[voice].ratio
                                     * self.params.detune[osc].get()
-                                    * self.voice[voice].pitch_offsets[u_voice],
+                                    * self.params.pitch_offsets[u_voice].get(),
                                 voice,
                                 osc,
                                 u_voice,
@@ -173,6 +184,7 @@ impl<'a> Default for Voiceset<'a> {
                 ..Default::default()
             },
             params: Arc::new(Parameters {
+                pitch_offs_val: AtomicF32::new(0.),
                 pitch_offsets: vec![
                     AtomicF32::new(1.),
                     AtomicF32::new(1.001),
@@ -207,7 +219,6 @@ pub struct Voice {
     wave_its: Vec<Vec<f32>>,
     grain_its: Vec<f32>,
     pos_offsets: Vec<f32>,
-    pitch_offsets: Vec<f32>,
     pub ratio: f32,
     pub grain_ratio: f32,
     pub(crate) wavetable_mip: usize,
@@ -251,7 +262,7 @@ impl Default for Voice {
             wave_its: vec![vec![0.; 7]; 2],
             grain_its: vec![0.; 7],
             pos_offsets: vec![1., 1.012, 0.988, 1.005, 0.994, 1.008, 0.992],
-            pitch_offsets: vec![1., 1.001, 0.999, 1.002, 0.998, 1.004, 0.996],
+            // pitch_offsets: vec![1., 1.001, 0.999, 1.002, 0.998, 1.004, 0.996],
             wavetable_mip: 0,
             grain_mip: 0,
             ratio: 1.,

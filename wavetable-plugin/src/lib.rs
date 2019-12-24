@@ -2,7 +2,6 @@
     This project is more meant to suit my personal bass needs, since all synths I've tried fall short in one way or another.
     Goal for now is 4 wavetable oscillators that can FM each other however you want them to
     TODO:
-    Changing unison spread
     Remove filter envelope
     Glide
     Get FM going
@@ -63,7 +62,7 @@ impl<'a> Plugin for Synth<'a> {
             inputs: 0,
             outputs: 1,
             category: Category::Synth,
-            parameters: 18,
+            parameters: 19,
             ..Default::default()
         }
     }
@@ -114,6 +113,7 @@ impl PluginParameters for Parameters {
             15 => self.inner.modenv_params.release_time.get() as f32 / 88200.,
             16 => self.inner.cutoff_amount.get(),
             17 => self.inner.g_uvoices.get() as f32 / 7.,
+            18 => self.inner.pitch_offs_val.get(),
             _ => 0.0,
         }
     }
@@ -170,6 +170,7 @@ impl PluginParameters for Parameters {
                 .set((value * 88200.) as usize),
             16 => self.inner.cutoff_amount.set(value),
             17 => self.inner.g_uvoices.set(((value * 6.).ceil()) as usize + 1),
+            18 => self.inner.change_spread(value),
             _ => (),
         }
     }
@@ -192,7 +193,8 @@ impl PluginParameters for Parameters {
             14 => "sustain level".to_string(),
             15 => "release time".to_string(),
             16 => "cutoff amount".to_string(),
-            17 => "grain unison".to_string(),
+            17 => "unison voices".to_string(),
+            18 => "unison_spread".to_string(),
             //4 => "Wet level".to_string(),
             _ => "".to_string(),
         }
@@ -217,6 +219,7 @@ impl PluginParameters for Parameters {
             15 => "ms".to_string(),
             16 => "%".to_string(),
             17 => "voices".to_string(),
+            18 => "".to_string(),
             _ => "".to_string(),
         }
     }
@@ -251,6 +254,7 @@ impl PluginParameters for Parameters {
             ),
             16 => format!("{:.3}", self.inner.cutoff_amount.get()),
             17 => format!("{}", self.inner.g_uvoices.get()),
+            18 => format!("{:.3}", self.inner.pitch_offs_val.get()),
             _ => format!(""),
         }
     }
