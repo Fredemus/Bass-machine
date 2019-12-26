@@ -145,8 +145,8 @@ impl<'a> WaveTable<'a> {
                     let i = _i * self.wave_len / 2usize.pow(_n as u32);
                     let n = mip_offset(_n, len);
 
-                    even1 = self.mips[n + i + j + 1] + self.mips[n + i + j + 0];
-                    odd1 = self.mips[n + i + j + 1] - self.mips[n + i + j + 0];
+                    even1 = self.mips[n + i + j + 1] + self.mips[n + i + j];
+                    odd1 = self.mips[n + i + j + 1] - self.mips[n + i + j];
                     even2 = self.mips[n + i + j + 2] + self.mips[n + i + j - 1];
                     odd2 = self.mips[n + i + j + 2] - self.mips[n + i + j - 1];
                     self.c0[n + i + j] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
@@ -163,14 +163,14 @@ impl<'a> WaveTable<'a> {
             for _i in 0..self.wave_number {
                 let i = _i * self.wave_len / 2usize.pow(_n as u32);
                 let n = mip_offset(_n, len);
-                even1 = self.mips[n + i + 0 + 1] + self.mips[n + i + 0 + 0];
-                odd1 = self.mips[n + i + 0 + 1] - self.mips[n + i + 0 + 0];
-                even2 = self.mips[n + i + 0 + 2] + self.mips[n + i + j - 1];
-                odd2 = self.mips[n + i + 0 + 2] - self.mips[n + i + j - 1];
-                self.c0[n + i + 0] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
-                self.c1[n + i + 0] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
-                self.c2[n + i + 0] = even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
-                self.c3[n + i + 0] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
+                even1 = self.mips[n + i + 1] + self.mips[n + i];
+                odd1 = self.mips[n + i + 1] - self.mips[n + i];
+                even2 = self.mips[n + i + 2] + self.mips[n + i + j - 1];
+                odd2 = self.mips[n + i + 2] - self.mips[n + i + j - 1];
+                self.c0[n + i] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
+                self.c1[n + i] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
+                self.c2[n + i] = even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
+                self.c3[n + i] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
             }
         }
         //makes sure the end of waveforms are handled properly
@@ -181,16 +181,16 @@ impl<'a> WaveTable<'a> {
                 let n = mip_offset(_n, len);
                 even1 = self.mips[n + i + j - 1] + self.mips[n + i + j - 2];
                 odd1 = self.mips[n + i + j - 1] - self.mips[n + i + j - 2];
-                even2 = self.mips[n + i + 0] + self.mips[n + i + j - 3];
-                odd2 = self.mips[n + i + 0] - self.mips[n + i + j - 3];
+                even2 = self.mips[n + i] + self.mips[n + i + j - 3];
+                odd2 = self.mips[n + i] - self.mips[n + i + j - 3];
                 self.c0[n + i + j - 2] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
                 self.c1[n + i + j - 2] = odd1 * 0.48068024766578432 + odd2 * 0.17577925564495955;
                 self.c2[n + i + j - 2] =
                     even1 * -0.246185007019907091 + even2 * 0.24614027139700284;
                 self.c3[n + i + j - 2] = odd1 * -0.36030925263849456 + odd2 * 0.10174985775982505;
 
-                even1 = self.mips[n + i + 0] + self.mips[n + i + j - 1];
-                odd1 = self.mips[n + i + 0] - self.mips[n + i + j - 1];
+                even1 = self.mips[n + i] + self.mips[n + i + j - 1];
+                odd1 = self.mips[n + i] - self.mips[n + i + j - 1];
                 even2 = self.mips[n + i + 1] + self.mips[n + i + j - 2];
                 odd2 = self.mips[n + i + 1] - self.mips[n + i + j - 2];
                 self.c0[n + i + j - 1] = even1 * 0.45868970870461956 + even2 * 0.04131401926395584;
@@ -202,7 +202,7 @@ impl<'a> WaveTable<'a> {
         }
     }
 
-    pub(crate) fn static_convolve(&self, p_coeffs: &[f32], p_in: &Vec<f32>) -> Vec<f32> {
+    pub(crate) fn static_convolve(&self, p_coeffs: &[f32], p_in: &[f32]) -> Vec<f32> {
         //possibly more efficient convolution https://stackoverflow.com/questions/8424170/1d-linear-convolution-in-ansi-c-code
         //convolution could be significantly sped up by doing it in the frequency domain. from O(n^2) to O(n*log(n))
         let mut convolved: Vec<f32>;

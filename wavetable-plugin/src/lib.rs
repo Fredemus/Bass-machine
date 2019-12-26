@@ -2,18 +2,22 @@
     This project is more meant to suit my personal bass needs, since all synths I've tried fall short in one way or another.
     Goal for now is 4 wavetable oscillators that can FM each other however you want them to
     TODO:
-    Stereo processing (for unison)    
+    Stereo filters    
+    Random-phase start
     Glide
     Get FM going
     Figure out the update to vst 0.2.0
+    use f64 where it makes sense (pitch and possibly interp coefficients)
     File system
     More wavetables
     Parameter smoothing
     Remove filter envelope
+    Fixes needed: 
+    For some reason oscillators get way more noisy when there's more than 1 voice
+
 
     Optimisation. look into doing simd on the oscillators sometime
     Licensing. Look into MIT and copyleft
-    https://docs.rs/nalgebra/0.3.2/nalgebra/struct.DVec3.html
     https://docs.rs/basic_dsp/0.2.0/basic_dsp/
 
 */
@@ -208,7 +212,7 @@ impl PluginParameters for Parameters {
             15 => "release time".to_string(),
             16 => "cutoff amount".to_string(),
             17 => "unison voices".to_string(),
-            18 => "unison_spread".to_string(),
+            18 => "unison detune".to_string(),
             //4 => "Wet level".to_string(),
             _ => "".to_string(),
         }

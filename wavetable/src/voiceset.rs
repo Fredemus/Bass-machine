@@ -115,9 +115,8 @@ impl<'a> Voiceset<'a> {
                             ) * self.params.vol[osc].get()
                                 * vol_mod;
                             temp2[1] = temp2[0];
-                            // this is panning logic
-                            let pan_amt = self.pan_voice(max, u_voice);
                             // panning channels according to linear pan rule
+                            let pan_amt = self.pan_voice(max, u_voice);
                             temp2[0] *= 1. - (pan_amt + 1.) / 2.;
                             temp2[1] *= (pan_amt + 1.) / 2.;
                             // moving oscillator output into the sum
@@ -125,7 +124,8 @@ impl<'a> Voiceset<'a> {
                         }
 
                     }
-                    temp[0] /= max as f32; // <- figure out if we still need this with stereo
+                    // reducing volume dependent on number of unison voices. keeps peak amplitude consistent.
+                    temp[0] /= max as f32; 
                     temp[1] /= max as f32;
                     unfiltered_new[0] += temp[0];
                     unfiltered_new[1] += temp[1];
@@ -156,7 +156,7 @@ impl<'a> Voiceset<'a> {
         it = self.voice[i].wave_its[j][u].floor() as usize
             + mip_offset
             + self.oscs[j].wave_len * self.params.pos[j].get() / 2usize.pow(mip as u32); // have a way to use each unison it in use
-        z_pos = self.voice[i].wave_its[j][0].fract(); // should z_pos have a -0.5?
+        z_pos = self.voice[i].wave_its[j][u].fract(); // should z_pos have a -0.5?
         temp = (((self.oscs[j].c3[it] * z_pos + self.oscs[j].c2[it]) * z_pos + self.oscs[j].c1[it])
             * z_pos
             + self.oscs[j].c0[it]) / 2.;
@@ -304,10 +304,10 @@ impl Voice {
         self.free = false;
         self.note = Some(note);
         self.time = 0;
-        //possibly call prep_buffer here?
     }
     pub fn free_voice(&mut self) {
         //if self.note == note {
+        self.note = None;
         self.free = true;
         //}
     }

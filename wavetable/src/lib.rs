@@ -14,8 +14,6 @@ pub struct Synth<'a> {
 }
 
 impl<'a> Synth<'a> {
-    // fills a buffer we can use for fir filtering.
-
     fn find_ratio(&mut self, note: u8, i: usize) -> f32 {
         let standard = 21.533203125; // default wavetable pitch
         let pn = 440f32 * (2f32.powf(1. / 12.)).powi(note as i32 - 69);
@@ -57,7 +55,6 @@ impl<'a> Synth<'a> {
     pub fn note_off(&mut self, note: u8) {
         for i in 0..8 {
             if self.voices.voice[i].note == Some(note) {
-                self.voices.voice[i].note = None;
                 self.voices.voice[i].free_voice();
                 self.voices.vol_env.note[i] = false;
                 self.voices.mod_env.note[i] = false;

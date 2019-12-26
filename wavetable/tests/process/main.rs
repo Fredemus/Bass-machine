@@ -31,7 +31,7 @@ fn _process_note_samples_stereo(notes: &[u8], samples: usize) -> [Vec<f32>; 2] {
 fn test_variable_value() {
     let _plugin = Synth::default();
 }
-
+// #[ignore(unused_variables)]
 #[test]
 fn test_process_mono() {
     for notes in SAMPLES.iter() {

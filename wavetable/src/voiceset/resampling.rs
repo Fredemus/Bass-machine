@@ -70,7 +70,7 @@ impl HalfbandFilter {
         let a_coefficients: Vec<f32>;
         let b_coefficients: Vec<f32>;
 
-        if steep == true {
+        if steep {
             if order == 12
             //rejection=104dB, transition band=0.01
             {
