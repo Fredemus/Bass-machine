@@ -9,8 +9,6 @@ Goal for now is 4 wavetable oscillators that can FM each other however you want 
 
 Features planned:
 * Stereo processing. Mostly for unison/potential effects
-* Unison voices 
-    All oscillators will have same unison for now to avoid parameter clutter
 * Modulation framework (envelopes done, next step adding destinations)
 * Nonlinear state variable filter (almost done)
 * FM 

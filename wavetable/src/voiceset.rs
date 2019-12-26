@@ -10,6 +10,10 @@ use crate::util::{AtomicF32, AtomicI8, AtomicUsize};
 
 /*
         Todo:
+        make Analog filter stereo
+        make polyphase filter stereo
+
+
         implement more filter modes
         iterate instead of index where it makes sense (should be ~20% faster),
 
@@ -72,18 +76,18 @@ pub struct Voiceset<'a> {
 
     //interp_buffer gives room for filtering continuous output from oscillator.
     pub(crate) interp_buffer: VecDeque<f32>,
-    pub poly_iir: resampling::HalfbandFilter,
+    pub poly_iir: [resampling::HalfbandFilter; 2],
 
     pub vol_env: modmatrix::Env,
     pub mod_env: modmatrix::Env,
     pub params: Arc<Parameters>,
 }
 impl<'a> Voiceset<'a> {
-    pub fn step_one(&mut self) -> f32 {
-        let mut output: f32 = 0.;
+    pub fn step_one(&mut self) -> [f32; 2] {
+        let mut output: [f32; 2] = [0.,0.];
         //downsampling for loop
         for _i in 0..self.oscs[0].amt_oversample {
-            let mut unfiltered_new = 0.;
+            let mut unfiltered_new = [0.; 2];
             for voice in 0..8 {
                 // this if-condition needs to be happened to something that happens once instead of continually
                 if self.vol_env.output[voice] == None {
@@ -94,13 +98,14 @@ impl<'a> Voiceset<'a> {
                     let vol_mod = self.vol_env.output[voice].unwrap();
                     self.vol_env.next(voice);
                     self.mod_env.next(voice);
-                    let env2 = self.mod_env.output[voice];
-                    let mut temp = 0.;
+                    // let env2 = self.mod_env.output[voice];
+                    let mut temp = [0.; 2];
+                    let max = self.params.g_uvoices.get();
                     //the 2 oscillators
                     for osc in 0..2 {
-                        // FIXME: voices should be chosen around the middle voice (number 4)
-                        for u_voice in 0..self.params.g_uvoices.get() {
-                            temp += self.single_interp(
+                        for u_voice in 0..max {
+                            let mut temp2 = [0.;2];
+                             temp2[0] = self.single_interp(
                                 self.voice[voice].ratio
                                     * self.params.detune[osc].get()
                                     * self.params.pitch_offsets[u_voice].get(),
@@ -109,18 +114,29 @@ impl<'a> Voiceset<'a> {
                                 u_voice,
                             ) * self.params.vol[osc].get()
                                 * vol_mod;
+                            temp2[1] = temp2[0];
+                            // this is panning logic
+                            let pan_amt = self.pan_voice(max, u_voice);
+                            // panning channels according to linear pan rule
+                            temp2[0] *= 1. - (pan_amt + 1.) / 2.;
+                            temp2[1] *= (pan_amt + 1.) / 2.;
+                            // moving oscillator output into the sum
+                            temp[0] += temp2[0]; temp[1] += temp2[1];
                         }
+
                     }
-                    temp /= self.params.g_uvoices.get() as f32;
-                    
-                    //the graintable osc
-                    self.filter[voice].tick_pivotal(temp, env2, self.params.cutoff_amount.get());
-                    //self.filter[voice].tick_pivotal(temp);
-                    unfiltered_new += self.filter[voice].vout[self.filter[0].params.poles.get()];
+                    temp[0] /= max as f32; // <- figure out if we still need this with stereo
+                    temp[1] /= max as f32;
+                    unfiltered_new[0] += temp[0];
+                    unfiltered_new[1] += temp[1];
+                    // filter outcommented until it's made stereo;
+                    // self.filter[voice].tick_pivotal(temp, env2, self.params.cutoff_amount.get());
+                    // unfiltered_new += self.filter[voice].vout[self.filter[0].params.poles.get()];
                 }
             }
             //----------- IIR FILTERING ------------------//
-            output = self.poly_iir.process(unfiltered_new);
+            output[0] = self.poly_iir[0].process(unfiltered_new[0]);
+            output[1] = self.poly_iir[1].process(unfiltered_new[1]);
         }
         return output;
     }
@@ -141,9 +157,10 @@ impl<'a> Voiceset<'a> {
             + mip_offset
             + self.oscs[j].wave_len * self.params.pos[j].get() / 2usize.pow(mip as u32); // have a way to use each unison it in use
         z_pos = self.voice[i].wave_its[j][0].fract(); // should z_pos have a -0.5?
-        temp = ((self.oscs[j].c3[it] * z_pos + self.oscs[j].c2[it]) * z_pos + self.oscs[j].c1[it])
+        temp = (((self.oscs[j].c3[it] * z_pos + self.oscs[j].c2[it]) * z_pos + self.oscs[j].c1[it])
             * z_pos
-            + self.oscs[j].c0[it];
+            + self.oscs[j].c0[it]) / 2.;
+        // temp[0] *= 1 - self.g_uvoices
         self.voice[i].wave_its[j][u] += x;
         if self.voice[i].wave_its[j][u] > (self.oscs[j].wave_len / 2usize.pow(mip as u32)) as f32 {
             //loop back around zero.
@@ -151,7 +168,48 @@ impl<'a> Voiceset<'a> {
         }
         return temp;
     }
+    pub fn pan_voice(&self, max: usize, u_voice: usize) -> f32 {
+        let pan_amt;
+        if max == 1 {
+            pan_amt = 0.;
+        }
+        else if max % 2 == 0 {
+            // println!("got here!");
+            if u_voice % 2 == 0 {
+                // even voices moved to left
+                pan_amt = -((u_voice + 2) as f32 / max as f32);
+            }
+            else {
+                // odd voices moved to the right. 
+                pan_amt = (u_voice + 1) as f32 / max as f32;
+            }
+        }
+        // this is how the spread should look if there's an odd number of voices
+        else {
+            if u_voice % 2 == 0 {
+                // even voices moved to left. highest voices moved the furthest
+                pan_amt = -((u_voice) as f32 / (max - 1) as f32);
+            }
+            else {
+                // odd voices moved to the right. voice 1 dead center.
+                pan_amt = (u_voice + 1) as f32 / (max - 1) as f32;
+
+            }
+        }
+        pan_amt
+    }
+    // pub fn voice_spread(&self, inp: [f32; 2], u: usize) -> [f32; 2] {
+    //     let n = self.params.g_uvoices.get();
+
+
+    //     match u {
+    //         2 => {},
+    //         _ => 
+    //     }
+    //     return inp;
+    // }
 }
+
 impl<'a> Default for Voiceset<'a> {
     fn default() -> Voiceset<'a> {
         let filters = vec![filter::LadderFilter::default(); 8];
@@ -165,9 +223,10 @@ impl<'a> Default for Voiceset<'a> {
         let mut osc2: interp::WaveTable = Default::default();
         osc2.change_table(&tables[0]);
         // creates the graintable oscillator and gets access to its parameter object
-        let mut poly_iir = resampling::HalfbandFilter::default();
+        let mut poly_iir = [resampling::HalfbandFilter::default(), resampling::HalfbandFilter::default()];
         //sets the halfband filter to 8th order steep
-        poly_iir.setup(8, true);
+        poly_iir[0].setup(8, true);
+        poly_iir[1].setup(8, true);
         let a = Voiceset {
             poly_iir: poly_iir,
             oscs: vec![osc1, osc2],
@@ -217,12 +276,9 @@ pub struct Voice {
     // every voice can share the same interpolator
     // pub(crate) oscs : &'a Interp,
     wave_its: Vec<Vec<f32>>,
-    grain_its: Vec<f32>,
     pos_offsets: Vec<f32>,
     pub ratio: f32,
-    pub grain_ratio: f32,
     pub(crate) wavetable_mip: usize,
-    pub(crate) grain_mip: usize,
     // pos gives the current wave
     pub note: Option<u8>,
     pub time: usize,
@@ -235,9 +291,10 @@ impl Voice {
         //reset iterators. Value they get set to could be changed to change phase,
         //or made random for analog-style random phase
         //https://rust-lang-nursery.github.io/rust-cookbook/algorithms/randomness.html
-        self.wave_its[0][0] = 0.;
-        self.wave_its[1][0] = 0.;
-        self.grain_its = vec![0.; 7];
+        self.wave_its = vec![vec![0.;7]; 2];
+        // self.wave_its[0][0] = 0.;
+        // self.wave_its[1][0] = 0.;
+        // self.grain_its = vec![0.; 7];
     }
     pub fn is_free(&self) -> bool {
         return self.free;
@@ -260,13 +317,11 @@ impl Default for Voice {
         let a = Voice {
             free: true,
             wave_its: vec![vec![0.; 7]; 2],
-            grain_its: vec![0.; 7],
+            // FIXME: pos_offsets should live in parameter struct
             pos_offsets: vec![1., 1.012, 0.988, 1.005, 0.994, 1.008, 0.992],
             // pitch_offsets: vec![1., 1.001, 0.999, 1.002, 0.998, 1.004, 0.996],
             wavetable_mip: 0,
-            grain_mip: 0,
             ratio: 1.,
-            grain_ratio: 1.,
             note: None,
             time: 0,
         };

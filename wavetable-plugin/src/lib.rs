@@ -2,13 +2,14 @@
     This project is more meant to suit my personal bass needs, since all synths I've tried fall short in one way or another.
     Goal for now is 4 wavetable oscillators that can FM each other however you want them to
     TODO:
-    Remove filter envelope
+    Stereo processing (for unison)    
     Glide
     Get FM going
     Figure out the update to vst 0.2.0
     File system
     More wavetables
     Parameter smoothing
+    Remove filter envelope
 
     Optimisation. look into doing simd on the oscillators sometime
     Licensing. Look into MIT and copyleft
@@ -60,7 +61,7 @@ impl<'a> Plugin for Synth<'a> {
             name: "BassMachine".to_string(),
             unique_id: 9265,
             inputs: 0,
-            outputs: 1,
+            outputs: 2,
             category: Category::Synth,
             parameters: 19,
             ..Default::default()
@@ -77,9 +78,22 @@ impl<'a> Plugin for Synth<'a> {
     }
 
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
-        let samples = buffer.samples();
-        let (_, mut outputs) = buffer.split();
-        self.synth.process(samples, &mut outputs);
+        // let samples = buffer.samples();
+        let (_, outputs) = buffer.split();
+        if outputs.len() < 2 {
+            return;
+        }
+        let (mut l, mut r) = outputs.split_at_mut(1);
+
+        let stereo_out = l[0].iter_mut().zip(r[0].iter_mut());
+        for (left_out, right_out) in stereo_out {
+            let out = self.synth.voices.step_one();
+            *left_out = out[0];
+            *right_out = out[1];
+        }
+        // using the plugin-agnostic process didn't work for splitting up 
+        // self.synth.process(samples, &mut l, &mut r);
+        // self.synth.process(samples, &mut outputs);
     }
     fn can_do(&self, can_do: CanDo) -> Supported {
         match can_do {

@@ -15,14 +15,7 @@ pub struct Synth<'a> {
 
 impl<'a> Synth<'a> {
     // fills a buffer we can use for fir filtering.
-    // pub(crate) fn prep_buffer(&mut self) {
-    //     self.voices
-    //         .interp_buffer
-    //         .resize(self.voices.oscs[0].downsample_fir.len() + 1, 0.);
-    //     for i in 0..self.voices.oscs[0].downsample_fir.len() - 1 {
-    //         self.voices.interp_buffer[i] = 0.;
-    //     }
-    // }
+
     fn find_ratio(&mut self, note: u8, i: usize) -> f32 {
         let standard = 21.533203125; // default wavetable pitch
         let pn = 440f32 * (2f32.powf(1. / 12.)).powi(note as i32 - 69);
@@ -32,16 +25,6 @@ impl<'a> Synth<'a> {
         self.voices.voice[i].wavetable_mip = mip;
         let downsampled_ratio = 2f32.powi(mip as i32);
         (pn / downsampled_ratio) / standard
-    }
-    fn find_ratio_grain(&mut self, note: u8, i: usize) -> f32 {
-        let pn = 440f32 * (2f32.powf(1. / 12.)).powi(note as i32 - 69);
-        //return ratio between desired pitch and standard
-        let diff = note - 17;
-        let mip = diff as usize / 12;
-        self.voices.voice[i].grain_mip = mip;
-        let downsampled_ratio = 2f32.powi(mip as i32);
-        //standard / pn
-        (pn / downsampled_ratio)
     }
     pub fn process_midi_event(&mut self, data: [u8; 3]) {
         match data[0] {
@@ -70,7 +53,6 @@ impl<'a> Synth<'a> {
         self.voices.vol_env.restart_env(i);
         self.voices.mod_env.restart_env(i);
         self.voices.voice[i].ratio = self.find_ratio(note, i);
-        self.voices.voice[i].grain_ratio = self.find_ratio_grain(note, i);
     }
     pub fn note_off(&mut self, note: u8) {
         for i in 0..8 {
@@ -82,20 +64,66 @@ impl<'a> Synth<'a> {
             }
         }
     }
-
     pub fn process<'b, I>(&mut self, samples: usize, outputs: I)
     where
         I: IntoIterator<Item = &'b mut [f32]>,
     {
         let mut output_sample;
         let mut outputs = outputs.into_iter().collect::<Vec<_>>();
-        for sample_idx in 0..samples {
+        for sample_idx in 0..samples/*(0..samples).step_by(2)*/ {
             output_sample = self.voices.step_one();
             for buff in outputs.iter_mut() {
-                buff[sample_idx] = output_sample;
+                buff[sample_idx] = output_sample[0];
+                // buff[1+ sample_idx] = output_sample[1];
+
             }
         }
-    }
+    } 
+    
+    // FIXME: process doesn't work in stereo. accessing samples for the left and right channel specifically gives problems
+    // All processing done in the plugin-specific process for now
+
+    // my attempt to fix process to handle stereo in a logical way
+    // problem right now is that this will only handle one sample in the buffer
+    // pub fn process<'b, I>(&mut self, samples: usize, l: I, r: I)
+    // where
+    //     I: IntoIterator<Item = &'b mut [f32]>,
+    // {
+    //     let mut output_sample;
+    //     // Iterate over outputs as (&mut f32, &mut f32)
+    //     // let (mut l, mut r) = outputs.split_at_mut(1);
+    //     let mut l = l.into_iter().collect::<Vec<_>>();
+    //     let mut r = r.into_iter().collect::<Vec<_>>();
+    //     let stereo_out = l[0].iter_mut().zip(r[0].iter_mut());
+        
+    //     for sample_idx in 0..samples {
+    //         output_sample = self.voices.step_one();
+    //         for (left_out,right_out) in stereo_out {
+    //             left_out[sample_idx] = output_sample[0];
+    //             right_out[sample_idx] = output_sample[1];
+    //         }
+    //         // for buff in outputs.iter_mut() {
+    //         //     buff[sample_idx] = output_sample;
+    //         // }
+    //     }   
+    // }
+    // what the heck is samples here?? How do we split output into left and right??
+    // doesn't really work properly right now
+    // pub fn process<'b, I>(&mut self, samples: usize, outputs: I)
+    // where
+    //     I: IntoIterator<Item = &'b mut [f32]>,
+    // {
+    //     let mut output_sample;
+    //     let mut outputs = outputs.into_iter().collect::<Vec<_>>();
+    //     for sample_idx in 0..samples {
+    //         output_sample = self.voices.step_one();
+    //         for buff in outputs.iter_mut() {
+    //             buff[sample_idx] = output_sample[0];
+    //             buff[sample_idx+1] = output_sample[1];
+    //         }
+    //     }
+    // }
+
 }
 
 impl<'a> Default for Synth<'a> {
