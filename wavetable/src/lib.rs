@@ -67,16 +67,17 @@ impl<'a> Synth<'a> {
     {
         let mut output_sample;
         let mut outputs = outputs.into_iter().collect::<Vec<_>>();
-        for sample_idx in 0..samples/*(0..samples).step_by(2)*/ {
+        for sample_idx in 0..samples
+        /*(0..samples).step_by(2)*/
+        {
             output_sample = self.voices.step_one();
             for buff in outputs.iter_mut() {
                 buff[sample_idx] = output_sample[0];
                 // buff[1+ sample_idx] = output_sample[1];
-
             }
         }
-    } 
-    
+    }
+
     // FIXME: process doesn't work in stereo. accessing samples for the left and right channel specifically gives problems
     // All processing done in the plugin-specific process for now
 
@@ -92,7 +93,7 @@ impl<'a> Synth<'a> {
     //     let mut l = l.into_iter().collect::<Vec<_>>();
     //     let mut r = r.into_iter().collect::<Vec<_>>();
     //     let stereo_out = l[0].iter_mut().zip(r[0].iter_mut());
-        
+
     //     for sample_idx in 0..samples {
     //         output_sample = self.voices.step_one();
     //         for (left_out,right_out) in stereo_out {
@@ -102,7 +103,7 @@ impl<'a> Synth<'a> {
     //         // for buff in outputs.iter_mut() {
     //         //     buff[sample_idx] = output_sample;
     //         // }
-    //     }   
+    //     }
     // }
     // what the heck is samples here?? How do we split output into left and right??
     // doesn't really work properly right now
@@ -120,7 +121,6 @@ impl<'a> Synth<'a> {
     //         }
     //     }
     // }
-
 }
 
 impl<'a> Default for Synth<'a> {

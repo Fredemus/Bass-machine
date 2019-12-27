@@ -12,24 +12,25 @@ enum Method {
     Linear,  // linear solution
     Pivotal, // Mystran's "cheap" method, using x=0 as pivot
 }
+
 //this is a 4-pole filter with resonance, which is why there's 4 states and vouts
 #[derive(Clone)]
 pub struct LadderFilter {
     // Store a handle to the plugin's parameter object.
     pub params: Arc<LadderParameters>,
     // the output of the different filter stages
-    pub vout: [f32; 4],
+    pub vout: [f32; 8],
     // s is the "state" parameter. In an IIR it would be the last value from the filter
     // In this we find it by trapezoidal integration to avoid the unit delay
-    s: [f32; 4],
+    s: [f32; 8],
 }
 
 //default values for parameters
 impl Default for LadderFilter {
     fn default() -> LadderFilter {
         LadderFilter {
-            vout: [0f32; 4],
-            s: [0f32; 4],
+            vout: [0f32; 8],
+            s: [0f32; 8],
             params: Arc::new(LadderParameters::default()),
         }
     }
@@ -67,24 +68,49 @@ impl Default for LadderParameters {
 impl LadderFilter {
     // the state needs to be updated after each process. Found by trapezoidal integration
     fn update_state(&mut self) {
+        // left states
         self.s[0] = 2. * self.vout[0] - self.s[0];
         self.s[1] = 2. * self.vout[1] - self.s[1];
         self.s[2] = 2. * self.vout[2] - self.s[2];
         self.s[3] = 2. * self.vout[3] - self.s[3];
+        // right states
+        self.s[4] = 2. * self.vout[4] - self.s[4];
+        self.s[5] = 2. * self.vout[5] - self.s[5];
+        self.s[6] = 2. * self.vout[6] - self.s[6];
+        self.s[7] = 2. * self.vout[7] - self.s[7];
     }
     // performs a complete filter process (mystran's method)
-    pub fn tick_pivotal(&mut self, input: f32, modboy: Option<f32>, amount: f32) {
-        if self.params.drive.get() > 0. {
-            self.run_ladder_nonlinear(input * (self.params.drive.get() + 0.7), modboy, amount);
-        } else {
-            //
-            self.run_ladder_linear(input, modboy, amount);
-        }
+    pub fn tick_pivotal(&mut self, input: [f32; 2], modboy: Option<f32>, amount: f32) {
+        // if self.params.drive.get() > 0. {
+        self.run_ladder_nonlinear(
+            input[0] * (self.params.drive.get() + 0.7),
+            modboy,
+            amount,
+            0,
+        );
+        self.run_ladder_nonlinear(
+            input[1] * (self.params.drive.get() + 0.7),
+            modboy,
+            amount,
+            1,
+        );
+
+        // } else {
+        //     //
+        //     self.run_ladder_linear(input, modboy, amount);
+        // }
         self.update_state();
     }
 
-    // nonlinear ladder filter function with distortion.
-    fn run_ladder_nonlinear(&mut self, input: f32, modboy: Option<f32>, amount: f32) {
+    // nonlinear ladder filter function with distortion. '
+    // for dir: 0 is left, 1 is right
+    fn run_ladder_nonlinear(
+        &mut self,
+        input: f32,
+        modboy: Option<f32>,
+        amount: f32,
+        channel: usize,
+    ) {
         let g = if modboy == None {
             self.params.g.get()
         } else {
@@ -98,7 +124,12 @@ impl LadderFilter {
             .max(0.002324)
         };
         let mut a = [1f32; 5];
-        let base = [input, self.s[0], self.s[1], self.s[2], self.s[3]];
+        let base;
+        if channel == 0 {
+            base = [input, self.s[0], self.s[1], self.s[2], self.s[3]];
+        } else {
+            base = [input, self.s[4], self.s[5], self.s[6], self.s[7]];
+        }
         // a[n] is the fixed-pivot approximation for tanh()
         for n in 0..base.len() {
             if base[n] != 0. {
@@ -118,17 +149,33 @@ impl LadderFilter {
         let f1 = g * a[1] * g1 * f2;
         let f0 = g * g0 * f1;
         // outputs a 24db filter
-        self.vout[3] = (f0 * input * a[0]
-            + f1 * g0 * self.s[0]
-            + f2 * g1 * self.s[1]
-            + f3 * g2 * self.s[2]
-            + g3 * self.s[3])
-            / (f0 * self.params.res.get() * a[3] + 1.);
-        // since we know the feedback, we can solve the remaining outputs:
-        self.vout[0] = g0
-            * (g * a[1] * (input * a[0] - self.params.res.get() * a[3] * self.vout[3]) + self.s[0]);
-        self.vout[1] = g1 * (g * a[2] * self.vout[0] + self.s[1]);
-        self.vout[2] = g2 * (g * a[3] * self.vout[1] + self.s[2]);
+        if channel == 0 {
+            self.vout[3] = (f0 * input * a[0]
+                + f1 * g0 * self.s[0]
+                + f2 * g1 * self.s[1]
+                + f3 * g2 * self.s[2]
+                + g3 * self.s[3])
+                / (f0 * self.params.res.get() * a[3] + 1.);
+            // since we know the feedback, we can solve the remaining outputs:
+            self.vout[0] = g0
+                * (g * a[1] * (input * a[0] - self.params.res.get() * a[3] * self.vout[3])
+                    + self.s[0]);
+            self.vout[1] = g1 * (g * a[2] * self.vout[0] + self.s[1]);
+            self.vout[2] = g2 * (g * a[3] * self.vout[1] + self.s[2]);
+        } else {
+            self.vout[7] = (f0 * input * a[0]
+                + f1 * g0 * self.s[4]
+                + f2 * g1 * self.s[5]
+                + f3 * g2 * self.s[6]
+                + g3 * self.s[7])
+                / (f0 * self.params.res.get() * a[3] + 1.);
+            // since we know the feedback, we can solve the remaining outputs:
+            self.vout[4] = g0
+                * (g * a[1] * (input * a[0] - self.params.res.get() * a[3] * self.vout[7])
+                    + self.s[4]);
+            self.vout[5] = g1 * (g * a[2] * self.vout[4] + self.s[5]);
+            self.vout[6] = g2 * (g * a[3] * self.vout[5] + self.s[6]);
+        }
     }
     // linear version without distortion
     pub fn run_ladder_linear(&mut self, input: f32, modboy: Option<f32>, amount: f32) {

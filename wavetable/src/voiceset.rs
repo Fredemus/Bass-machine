@@ -10,9 +10,6 @@ use crate::util::{AtomicF32, AtomicI8, AtomicUsize};
 
 /*
         Todo:
-        make Analog filter stereo
-        make polyphase filter stereo
-
 
         implement more filter modes
         iterate instead of index where it makes sense (should be ~20% faster),
@@ -61,7 +58,7 @@ impl Parameters {
         // spreading every second voice the other way from center
         for i in (1..8).step_by(2) {
             self.pitch_offsets[i].set(val * (i) as f32 + 1.);
-            self.pitch_offsets[i+1].set(-val * (i) as f32 + 1.);
+            self.pitch_offsets[i + 1].set(-val * (i) as f32 + 1.);
         }
     }
 }
@@ -69,7 +66,7 @@ impl Parameters {
 #[allow(dead_code)]
 pub struct Voiceset<'a> {
     pub oscs: Vec<interp::WaveTable<'a>>,
-    //vector of filters, since each voice will need its own filter when envelopes are added
+    //vector of filters, since each voice will need its own filter for envelopes
     pub filter: Vec<filter::LadderFilter>,
     //pub osc2_vol : f32, pub det2 : f32,
     pub voice: Vec<Voice>,
@@ -84,7 +81,7 @@ pub struct Voiceset<'a> {
 }
 impl<'a> Voiceset<'a> {
     pub fn step_one(&mut self) -> [f32; 2] {
-        let mut output: [f32; 2] = [0.,0.];
+        let mut output: [f32; 2] = [0., 0.];
         //downsampling for loop
         for _i in 0..self.oscs[0].amt_oversample {
             let mut unfiltered_new = [0.; 2];
@@ -98,14 +95,14 @@ impl<'a> Voiceset<'a> {
                     let vol_mod = self.vol_env.output[voice].unwrap();
                     self.vol_env.next(voice);
                     self.mod_env.next(voice);
-                    // let env2 = self.mod_env.output[voice];
+                    let env2 = self.mod_env.output[voice];
                     let mut temp = [0.; 2];
                     let max = self.params.g_uvoices.get();
                     //the 2 oscillators
                     for osc in 0..2 {
                         for u_voice in 0..max {
-                            let mut temp2 = [0.;2];
-                             temp2[0] = self.single_interp(
+                            let mut temp2 = [0.; 2];
+                            temp2[0] = self.single_interp(
                                 self.voice[voice].ratio
                                     * self.params.detune[osc].get()
                                     * self.params.pitch_offsets[u_voice].get(),
@@ -120,18 +117,20 @@ impl<'a> Voiceset<'a> {
                             temp2[0] *= 1. - (pan_amt + 1.) / 2.;
                             temp2[1] *= (pan_amt + 1.) / 2.;
                             // moving oscillator output into the sum
-                            temp[0] += temp2[0]; temp[1] += temp2[1];
+                            temp[0] += temp2[0];
+                            temp[1] += temp2[1];
                         }
-
                     }
                     // reducing volume dependent on number of unison voices. keeps peak amplitude consistent.
-                    temp[0] /= max as f32; 
+                    temp[0] /= max as f32;
                     temp[1] /= max as f32;
-                    unfiltered_new[0] += temp[0];
-                    unfiltered_new[1] += temp[1];
+                    // unfiltered_new[0] += temp[0];
+                    // unfiltered_new[1] += temp[1];
                     // filter outcommented until it's made stereo;
-                    // self.filter[voice].tick_pivotal(temp, env2, self.params.cutoff_amount.get());
-                    // unfiltered_new += self.filter[voice].vout[self.filter[0].params.poles.get()];
+                    self.filter[voice].tick_pivotal(temp, env2, self.params.cutoff_amount.get());
+                    unfiltered_new[0] += self.filter[voice].vout[self.filter[0].params.poles.get()];
+                    unfiltered_new[1] +=
+                        self.filter[voice].vout[self.filter[0].params.poles.get() + 4];
                 }
             }
             //----------- IIR FILTERING ------------------//
@@ -141,6 +140,7 @@ impl<'a> Voiceset<'a> {
         return output;
     }
     // TODO: Potentially use u here to have wavetable position spread
+    // i is voice, j is oscillator, u is unison voice
     pub(crate) fn single_interp(&mut self, ratio: f32, i: usize, j: usize, u: usize) -> f32 {
         // Optimal 2x (4-point, 3rd-order) (z-form)
         // return ((c3*z+c2)*z+c1)*z+c0;
@@ -157,10 +157,11 @@ impl<'a> Voiceset<'a> {
             + mip_offset
             + self.oscs[j].wave_len * self.params.pos[j].get() / 2usize.pow(mip as u32); // have a way to use each unison it in use
         z_pos = self.voice[i].wave_its[j][u].fract(); // should z_pos have a -0.5?
-        temp = (((self.oscs[j].c3[it] * z_pos + self.oscs[j].c2[it]) * z_pos + self.oscs[j].c1[it])
+        temp = (((self.oscs[j].c3[it] * z_pos + self.oscs[j].c2[it]) * z_pos
+            + self.oscs[j].c1[it])
             * z_pos
-            + self.oscs[j].c0[it]) / 2.;
-        // temp[0] *= 1 - self.g_uvoices
+            + self.oscs[j].c0[it])
+            / 2.;
         self.voice[i].wave_its[j][u] += x;
         if self.voice[i].wave_its[j][u] > (self.oscs[j].wave_len / 2usize.pow(mip as u32)) as f32 {
             //loop back around zero.
@@ -172,15 +173,13 @@ impl<'a> Voiceset<'a> {
         let pan_amt;
         if max == 1 {
             pan_amt = 0.;
-        }
-        else if max % 2 == 0 {
+        } else if max % 2 == 0 {
             // println!("got here!");
             if u_voice % 2 == 0 {
                 // even voices moved to left
                 pan_amt = -((u_voice + 2) as f32 / max as f32);
-            }
-            else {
-                // odd voices moved to the right. 
+            } else {
+                // odd voices moved to the right.
                 pan_amt = (u_voice + 1) as f32 / max as f32;
             }
         }
@@ -189,25 +188,13 @@ impl<'a> Voiceset<'a> {
             if u_voice % 2 == 0 {
                 // even voices moved to left. highest voices moved the furthest
                 pan_amt = -((u_voice) as f32 / (max - 1) as f32);
-            }
-            else {
+            } else {
                 // odd voices moved to the right. voice 1 dead center.
                 pan_amt = (u_voice + 1) as f32 / (max - 1) as f32;
-
             }
         }
         pan_amt
     }
-    // pub fn voice_spread(&self, inp: [f32; 2], u: usize) -> [f32; 2] {
-    //     let n = self.params.g_uvoices.get();
-
-
-    //     match u {
-    //         2 => {},
-    //         _ => 
-    //     }
-    //     return inp;
-    // }
 }
 
 impl<'a> Default for Voiceset<'a> {
@@ -223,7 +210,10 @@ impl<'a> Default for Voiceset<'a> {
         let mut osc2: interp::WaveTable = Default::default();
         osc2.change_table(&tables[0]);
         // creates the graintable oscillator and gets access to its parameter object
-        let mut poly_iir = [resampling::HalfbandFilter::default(), resampling::HalfbandFilter::default()];
+        let mut poly_iir = [
+            resampling::HalfbandFilter::default(),
+            resampling::HalfbandFilter::default(),
+        ];
         //sets the halfband filter to 8th order steep
         poly_iir[0].setup(8, true);
         poly_iir[1].setup(8, true);
@@ -291,7 +281,7 @@ impl Voice {
         //reset iterators. Value they get set to could be changed to change phase,
         //or made random for analog-style random phase
         //https://rust-lang-nursery.github.io/rust-cookbook/algorithms/randomness.html
-        self.wave_its = vec![vec![0.;7]; 2];
+        self.wave_its = vec![vec![0.; 7]; 2];
         // self.wave_its[0][0] = 0.;
         // self.wave_its[1][0] = 0.;
         // self.grain_its = vec![0.; 7];

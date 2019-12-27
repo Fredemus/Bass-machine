@@ -24,7 +24,7 @@ pub fn mip_offset(mip: usize, len: usize) -> usize {
 pub struct WaveTable<'a> {
     source_y: Vec<f32>,
     pub(crate) waveforms: Vec<f32>,
-    /// the numbe of waveforms in the current wavetable
+    /// the number of waveforms in the current wavetable
     pub(crate) wave_number: usize,
     pub wave_len: usize,
     pub(crate) len: usize,

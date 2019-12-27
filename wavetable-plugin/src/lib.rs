@@ -2,7 +2,7 @@
     This project is more meant to suit my personal bass needs, since all synths I've tried fall short in one way or another.
     Goal for now is 4 wavetable oscillators that can FM each other however you want them to
     TODO:
-    Stereo filters    
+    Stereo filters
     Random-phase start
     Glide
     Get FM going
@@ -12,7 +12,7 @@
     More wavetables
     Parameter smoothing
     Remove filter envelope
-    Fixes needed: 
+    Fixes needed:
     For some reason oscillators get way more noisy when there's more than 1 voice
 
 
@@ -95,7 +95,7 @@ impl<'a> Plugin for Synth<'a> {
             *left_out = out[0];
             *right_out = out[1];
         }
-        // using the plugin-agnostic process didn't work for splitting up 
+        // using the plugin-agnostic process didn't work for splitting up
         // self.synth.process(samples, &mut l, &mut r);
         // self.synth.process(samples, &mut outputs);
     }
