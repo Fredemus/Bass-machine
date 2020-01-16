@@ -1,14 +1,10 @@
 //stage-focused?
 //look-up tables could potentially be way faster
 /*
-By the way that formula for envelopes is
-
-y = x e^(k(x-1)), convex
-
-y = 1 - (1-x) e ^ (k(1-x)), concave
-k >= 0
-
-phase modulation on a linear envelope could give slope control, and only need one stage (reversed for release and limited for decay)
+/// The formula for envelopes is
+/// y = x e^(k(x-1)), convex
+/// y = 1 - (1-x) e ^ (k(1-x)), concave
+/// k >= 0
 
 */
 use crate::util::{AtomicF32, AtomicUsize};
@@ -29,7 +25,7 @@ impl Default for EnvParams {
             decay_time: AtomicUsize::new(8820),
             sustain: AtomicF32::new(1.0),
             release_time: AtomicUsize::new(882),
-            attack_slope: AtomicF32::new(1.2),
+            attack_slope: AtomicF32::new(0.5),
             decay_slope: AtomicF32::new(0.5),
             release_slope: AtomicF32::new(0.6),
             // attack_time: 882, //882 samples is 20ms

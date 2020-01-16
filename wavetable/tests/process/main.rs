@@ -29,11 +29,13 @@ fn _process_note_samples_stereo(notes: &[u8], samples: usize) -> [Vec<f32>; 2] {
 // has to be run with cargo test -- --nocapture or the println! will be suppressed
 #[test]
 fn test_variable_value() {
-    let tables = wavetable::resources::tables().unwrap();
-    println!("table len should be 2: {}", tables.len());
-    assert_eq!(tables.len(), 2);
-    println!("{:?}", tables[0]);
-    // let mut _plugin = Synth::default();
+    // let tables = wavetable::resources::tables().unwrap();
+    // println!("table len should be 2: {}", tables.len());
+    // assert_eq!(tables.len(), 2);
+    // println!("{:?}", tables[0]);
+    let mut plugin = Synth::default();
+    plugin.voices.params.change_spread(0.37);
+    
     // _plugin.voices.oscs[0].change_table(&tables[1]);
     // println!(
     //     "wavetable sample len: {}",

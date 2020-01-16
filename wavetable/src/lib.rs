@@ -47,7 +47,7 @@ impl<'a> Synth<'a> {
             return;
         }
         // setup of the voice
-        self.voices.voice[i].use_voice(note);
+        self.voices.voice[i].use_voice(note, &self.voices.params.octave);
         self.voices.vol_env.restart_env(i);
         self.voices.mod_env.restart_env(i);
         self.voices.voice[i].ratio = self.find_ratio(note, i);

@@ -8,6 +8,8 @@ mod modmatrix;
 mod resampling;
 use crate::util::{AtomicF32, AtomicI8, AtomicUsize};
 
+extern crate rand;
+use rand::Rng;
 /*
         Todo:
 
@@ -50,13 +52,13 @@ pub struct Parameters {
     pub wave_number2: usize,
 }
 impl Parameters {
-    // FIXME: Does this make sense when using fewer voices?
+    // FIXME: This needs to make sense with an even amount of voices
     pub fn change_spread(&self, value: f32) {
         self.pitch_offs_val.set(value);
-        // limit val to go between 0 to 0.05
+        // limit val to go between 0 to 0.008
         let val = value * 0.008;
         // spreading every second voice the other way from center
-        for i in (1..8).step_by(2) {
+        for i in (1..7).step_by(2) {
             self.pitch_offsets[i].set(val * (i) as f32 + 1.);
             self.pitch_offsets[i + 1].set(-val * (i) as f32 + 1.);
         }
@@ -156,7 +158,7 @@ impl<'a> Voiceset<'a> {
         let z_pos; //= z.fract();
         it = self.voice[i].wave_its[j][u].floor() as usize
             + mip_offset
-            + self.oscs[j].wave_len * self.params.pos[j].get() / 2usize.pow(mip as u32); // have a way to use each unison it in use
+            + self.oscs[j].wave_len * self.params.pos[j].get() / 2usize.pow(mip as u32);
         z_pos = self.voice[i].wave_its[j][u].fract(); // should z_pos have a -0.5?
         temp = (((self.oscs[j].c3[it] * z_pos + self.oscs[j].c2[it]) * z_pos
             + self.oscs[j].c1[it])
@@ -204,18 +206,17 @@ impl<'a> Default for Voiceset<'a> {
         let modenv = modmatrix::Env::default();
         let mod_env_params = modenv.params.clone();
         let filter_params = filters.iter().map(|f| f.params.clone()).collect();
-        // creates the wavetable oscillators
+        // create the wavetable oscillators
         let tables = crate::resources::tables().unwrap();
         let mut osc1: interp::WaveTable = Default::default();
         osc1.change_table(&tables[0]);
         let mut osc2: interp::WaveTable = Default::default();
         osc2.change_table(&tables[0]);
-        // creates the graintable oscillator and gets access to its parameter object
         let mut poly_iir = [
             resampling::HalfbandFilter::default(),
             resampling::HalfbandFilter::default(),
         ];
-        //sets the halfband filter to 8th order steep
+        //sets the halfband filters to 8th order steep
         poly_iir[0].setup(8, true);
         poly_iir[1].setup(8, true);
         let a = Voiceset {
@@ -278,20 +279,24 @@ pub struct Voice {
 
 #[allow(dead_code)]
 impl Voice {
-    pub fn reset_its(&mut self) {
+    pub fn reset_its(&mut self, octave: &Vec<AtomicI8>) {
         //reset iterators. Value they get set to could be changed to change phase,
         //or made random for analog-style random phase
         //https://rust-lang-nursery.github.io/rust-cookbook/algorithms/randomness.html
-        self.wave_its = vec![vec![0.; 7]; 2];
-        // self.wave_its[0][0] = 0.;
-        // self.wave_its[1][0] = 0.;
-        // self.grain_its = vec![0.; 7];
+        // self.wave_its = vec![vec![0.; 7]; 2];
+        let mut rng = rand::thread_rng();
+        for i in 0..2 {
+            for j in 0..7 {
+                // FIXME: Doesn't take octave switch into account, might be a bit fucky with the phase
+                self.wave_its[i][j] = rng.gen_range(0., (4096 / 2usize.pow((self.wavetable_mip as i8 + octave[i].get()) as u32)) as f32);
+            }
+        }
     }
     pub fn is_free(&self) -> bool {
         return self.free;
     }
-    pub fn use_voice(&mut self, note: u8) {
-        self.reset_its();
+    pub fn  use_voice(&mut self, note: u8, octave: &Vec<AtomicI8>) {
+        self.reset_its(octave);
         self.free = false;
         self.note = Some(note);
         self.time = 0;
