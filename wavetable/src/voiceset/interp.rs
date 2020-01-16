@@ -22,7 +22,7 @@ pub fn mip_offset(mip: usize, len: usize) -> usize {
 
 #[derive(Clone)]
 pub struct WaveTable<'a> {
-    source_y: Vec<f32>,
+    pub source_y: Vec<f32>,
     pub(crate) waveforms: Vec<f32>,
     /// the number of waveforms in the current wavetable
     pub(crate) wave_number: usize,
@@ -44,7 +44,6 @@ pub struct WaveTable<'a> {
 impl<'a> WaveTable<'a> {
     pub fn change_table(&mut self, table: &Table) {
         self.source_y = table.clone().load().unwrap();
-        // self.slice();
         self.len = self.source_y.len();
         self.wave_len = 2048;
         self.wave_number = self.len / self.wave_len;
@@ -201,9 +200,8 @@ impl<'a> WaveTable<'a> {
             }
         }
     }
-
+    // FIXME: Would this be better with "wraparound" logic? that is, if k < i then temp[temp.len() + (k - i)]
     pub(crate) fn static_convolve(&self, p_coeffs: &[f32], p_in: &[f32]) -> Vec<f32> {
-        //possibly more efficient convolution https://stackoverflow.com/questions/8424170/1d-linear-convolution-in-ansi-c-code
         //convolution could be significantly sped up by doing it in the frequency domain. from O(n^2) to O(n*log(n))
         let mut convolved: Vec<f32>;
         let new_len = p_in.len() + (p_coeffs.len() - 1) / 2;
@@ -223,8 +221,9 @@ impl<'a> WaveTable<'a> {
                 }
             }
         }
-        //trimming the result
-        //remove initial group delay by taking number of coefficients - 1 / 2. Only works for odd number of coefficients
+        // trimming the result
+        // remove initial group delay by taking number of coefficients - 1 / 2. Only works for odd number of coefficients
+        // FIXME: Use split_at here instead
         for _i in 0..(p_coeffs.len() - 1) / 2 {
             convolved.remove(0); //maybe use drain on an iterator instead?
         }
@@ -244,9 +243,6 @@ impl<'a> Default for WaveTable<'a> {
             wave_number: 0,
             amt_oversample: 1,
             wave_len: 2048,
-            //coeffs : Vec<Vec<f32>>, //hopefully this can make 2 vectors of f32
-            //default capacity should take oversampling into account
-            //capacity probably needs only to be the number of mips
             c0: Vec::with_capacity(10),
             c1: Vec::with_capacity(10),
             c2: Vec::with_capacity(10),

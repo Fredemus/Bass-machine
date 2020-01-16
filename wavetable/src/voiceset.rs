@@ -149,7 +149,8 @@ impl<'a> Voiceset<'a> {
         let mip_offset = mip_offset(mip, self.oscs[j].len);
         let temp: f32;
         let it: usize;
-        //x is the placement of the sample compared to the last one, or the slope
+        //x is the placement of the sample compared to the last one, or the slope/change in phase
+        // TODO: Use output of an oscillator to change phase
         let x = ratio;
         //let z = x - 0.5;
         let z_pos; //= z.fract();

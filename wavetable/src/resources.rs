@@ -1,4 +1,4 @@
-use std::{io, iter::once, path::PathBuf};
+use std::{fs, io, iter::once, path::PathBuf};
 
 use dirs;
 use either::{Left, Right};
@@ -62,7 +62,8 @@ pub fn tables() -> io::Result<Vec<Table>> {
 
 lazy_static! {
     static ref BUILTINS: Vec<Table> = {
-        macro_rules! include_wav {
+        /// for single wav files. included as sample arrays
+        macro_rules! _include_wav {
             ( $path:expr ) => {{
                 let bytes = include_bytes!($path);
                 let reader = WavReader::new(&bytes[..]).unwrap();
@@ -70,9 +71,23 @@ lazy_static! {
                 Table::BuiltIn(samples)
             }};
         }
-
-        vec![include_wav!("../resources/tables/Basic Shapes.wav")]
+        /// for entire directories. included as paths
+        macro_rules! _include_folder {
+            ( $path:expr ) => {{
+                let mut table_vec : Vec<Table> = Vec::new();
+                for entry in fs::read_dir($path).unwrap() {
+                    let pathy = fs::canonicalize(entry.unwrap().path().as_path()).unwrap();
+                    // pathy.strip_prefix(r"\\\\?\\");
+                    table_vec.push(Table::WavFile((pathy)));
+                }
+                table_vec
+            }};
+        }
+        // _include_folder!("./resources/tables")
+        // _include_folder!(r"C:\Users\rasmu\Documents\RustProjects\bass-machine\wavetable\resources\tables")
+        vec![_include_wav!("../resources/tables/Basic Shapes.wav")]
     };
+    // FIXME: Shouldn't be Graintable in these
     static ref PRESET_DIRS: Vec<PathBuf> = {
         #[cfg(windows)]
         {
@@ -101,7 +116,6 @@ lazy_static! {
 }
 
 #[test]
-#[ignore]
 fn print_tables() {
     let tables = tables().unwrap();
     println!("{:#?}", tables);

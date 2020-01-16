@@ -2,18 +2,16 @@
     This project is more meant to suit my personal bass needs, since all synths I've tried fall short in one way or another.
     Goal for now is 4 wavetable oscillators that can FM each other however you want them to
     TODO:
-    Stereo filters
     Random-phase start
     Glide
+    Turn off processing for inactive oscillators (some magic with the for loop?)
     Get FM going
     Figure out the update to vst 0.2.0
     use f64 where it makes sense (pitch and possibly interp coefficients)
-    File system
+    Figure out file system
     More wavetables
     Parameter smoothing
     Remove filter envelope
-    Fixes needed:
-    For some reason oscillators get way more noisy when there's more than 1 voice
 
 
     Optimisation. look into doing simd on the oscillators sometime
@@ -109,7 +107,19 @@ impl<'a> Plugin for Synth<'a> {
         Arc::clone(&self.params) as Arc<dyn PluginParameters>
     }
 }
+/*
+    Parameters that could be added easily, but won't be until there's a gui:
+    vol env parameters
+    envelope slopes
+    Osc panning
+    Osc on/off switches
+    filter on/off
+    Unison blend
+    Parameters that could be added with some effort when there's a gui:
+    more waveshaping parameters in the style of sytrus
+    spectral crossfading for wavetables with few waves
 
+*/
 impl PluginParameters for Parameters {
     fn get_parameter(&self, index: i32) -> f32 {
         match index {

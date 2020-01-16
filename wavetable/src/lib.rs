@@ -8,9 +8,9 @@ pub mod voiceset;
 
 pub struct Synth<'a> {
     note_duration: f64,
-    pub sample_rate: f32,               // FIXME(will): should not be pub
+    pub sample_rate: f32, // FIXME(will): should not be pub
     pub voices: voiceset::Voiceset<'a>, // FIXME(will): should not be pub
-    wt_len: Vec<usize>,
+                          // wt_len: Vec<usize>,
 }
 
 impl<'a> Synth<'a> {
@@ -125,17 +125,13 @@ impl<'a> Synth<'a> {
 
 impl<'a> Default for Synth<'a> {
     fn default() -> Synth<'a> {
-        let mut a = Synth {
+        Synth {
             note_duration: 0.0,
             sample_rate: 44100.,
             voices: voiceset::Voiceset {
                 ..Default::default()
             },
-            wt_len: vec![7, 7],
-        };
-        a.wt_len[0] = a.voices.oscs[0].len / (2048 * a.voices.oscs[0].amt_oversample);
-        a.wt_len[1] = a.voices.oscs[1].len / (2048 * a.voices.oscs[1].amt_oversample);
-        return a;
+        }
     }
 }
 
