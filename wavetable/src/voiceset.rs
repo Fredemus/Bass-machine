@@ -72,7 +72,6 @@ pub struct Voiceset<'a> {
     pub filter: Vec<filter::LadderFilter>,
     //pub osc2_vol : f32, pub det2 : f32,
     pub voice: Vec<Voice>,
-
     //interp_buffer gives room for filtering continuous output from oscillator.
     pub(crate) interp_buffer: VecDeque<f32>,
     pub poly_iir: [resampling::HalfbandFilter; 2],
@@ -95,9 +94,9 @@ impl<'a> Voiceset<'a> {
                     // add the output of the active voices together
                 } else {
                     let vol_mod = self.vol_env.output[voice].unwrap();
+                    let env2 = self.mod_env.output[voice];
                     self.vol_env.next(voice);
                     self.mod_env.next(voice);
-                    let env2 = self.mod_env.output[voice];
                     let mut temp = [0.; 2];
                     let max = self.params.g_uvoices.get();
                     //the 2 oscillators
@@ -113,12 +112,11 @@ impl<'a> Voiceset<'a> {
                                 u_voice,
                             ) * self.params.vol[osc].get()
                                 * vol_mod;
-                            temp2[1] = temp2[0];
                             // panning channels according to linear pan rule
                             let pan_amt = self.pan_voice(max, u_voice);
+                            temp2[1] = temp2[0] * (pan_amt + 1.) / 2.;
                             temp2[0] *= 1. - (pan_amt + 1.) / 2.;
-                            temp2[1] *= (pan_amt + 1.) / 2.;
-                            // moving oscillator output into the sum
+                            // moving voice output into the sum
                             temp[0] += temp2[0];
                             temp[1] += temp2[1];
                         }
@@ -135,7 +133,7 @@ impl<'a> Voiceset<'a> {
                         self.filter[voice].vout[self.filter[0].params.poles.get() + 4];
                 }
             }
-            //----------- IIR FILTERING ------------------//
+            //----------- IIR FILTERING (for anti-aliasing) ------------------//
             output[0] = self.poly_iir[0].process(unfiltered_new[0]);
             output[1] = self.poly_iir[1].process(unfiltered_new[1]);
         }
@@ -160,11 +158,9 @@ impl<'a> Voiceset<'a> {
             + mip_offset
             + self.oscs[j].wave_len * self.params.pos[j].get() / 2usize.pow(mip as u32);
         z_pos = self.voice[i].wave_its[j][u].fract(); // should z_pos have a -0.5?
-        temp = (((self.oscs[j].c3[it] * z_pos + self.oscs[j].c2[it]) * z_pos
-            + self.oscs[j].c1[it])
+        temp = ((self.oscs[j].c3[it] * z_pos + self.oscs[j].c2[it]) * z_pos + self.oscs[j].c1[it])
             * z_pos
-            + self.oscs[j].c0[it])
-            / 2.;
+            + self.oscs[j].c0[it];
         self.voice[i].wave_its[j][u] += x;
         if self.voice[i].wave_its[j][u] > (self.oscs[j].wave_len / 2usize.pow(mip as u32)) as f32 {
             //loop back around zero.
@@ -177,7 +173,6 @@ impl<'a> Voiceset<'a> {
         if max == 1 {
             pan_amt = 0.;
         } else if max % 2 == 0 {
-            // println!("got here!");
             if u_voice % 2 == 0 {
                 // even voices moved to left
                 pan_amt = -((u_voice + 2) as f32 / max as f32);
@@ -288,14 +283,17 @@ impl Voice {
         for i in 0..2 {
             for j in 0..7 {
                 // FIXME: Doesn't take octave switch into account, might be a bit fucky with the phase
-                self.wave_its[i][j] = rng.gen_range(0., (4096 / 2usize.pow((self.wavetable_mip as i8 + octave[i].get()) as u32)) as f32);
+                self.wave_its[i][j] = rng.gen_range(
+                    0.,
+                    (4096 / 2usize.pow((self.wavetable_mip as i8 + octave[i].get()) as u32)) as f32,
+                );
             }
         }
     }
     pub fn is_free(&self) -> bool {
         return self.free;
     }
-    pub fn  use_voice(&mut self, note: u8, octave: &Vec<AtomicI8>) {
+    pub fn use_voice(&mut self, note: u8, octave: &Vec<AtomicI8>) {
         self.reset_its(octave);
         self.free = false;
         self.note = Some(note);

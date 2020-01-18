@@ -35,7 +35,7 @@ fn test_variable_value() {
     // println!("{:?}", tables[0]);
     let mut plugin = Synth::default();
     plugin.voices.params.change_spread(0.37);
-    
+
     // _plugin.voices.oscs[0].change_table(&tables[1]);
     // println!(
     //     "wavetable sample len: {}",

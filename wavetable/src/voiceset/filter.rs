@@ -59,7 +59,7 @@ impl Default for LadderParameters {
             poles: AtomicUsize::new(3),
             pole_value: AtomicF32::new(1.),
             drive: AtomicF32::new(0.),
-            sample_rate: AtomicF32::new(44100.),
+            sample_rate: AtomicF32::new(44100. * 2.),
             g: AtomicF32::new(0.07135868087),
         }
     }
@@ -100,10 +100,17 @@ impl LadderFilter {
         //     self.run_ladder_linear(input, modboy, amount);
         // }
         self.update_state();
+        self.gain_comp();
+    }
+    // for gain compensating to avoid bass loss on transistor ladder filter
+    fn gain_comp(&mut self) {
+        for x in &mut self.vout {
+            *x *= 1. + self.params.res.get();
+        }
     }
 
-    // nonlinear ladder filter function with distortion. '
-    // for dir: 0 is left, 1 is right
+    // nonlinear ladder filter function with distortion.
+    // for channel: 0 is left, 1 is right
     fn run_ladder_nonlinear(
         &mut self,
         input: f32,
@@ -117,7 +124,7 @@ impl LadderFilter {
             //let cutoff = self.cutoff * ((1.8f32.powf(10. * modboy.unwrap() - 10.)));
             //(3.1415 * self.cutoff / (self.sample_rate)).tan();
             //consider doing min-max on cutoff instead to simplify what's happening
-            (PI * (self.params.cutoff.get() + (20000. * (modboy.unwrap() - 0.5) * amount))
+            (PI * (self.params.cutoff.get() + (20000. * (modboy.unwrap()) * amount))
                 / (self.params.sample_rate.get()))
             .tan()
             .min(6.787)

@@ -21,20 +21,13 @@ pub struct EnvParams {
 impl Default for EnvParams {
     fn default() -> EnvParams {
         EnvParams {
-            attack_time: AtomicUsize::new(882),
-            decay_time: AtomicUsize::new(8820),
+            attack_time: AtomicUsize::new(882), //882 samples is 20ms
+            decay_time: AtomicUsize::new(8820), //8820 samples is 200ms
             sustain: AtomicF32::new(1.0),
             release_time: AtomicUsize::new(882),
             attack_slope: AtomicF32::new(0.5),
             decay_slope: AtomicF32::new(0.5),
             release_slope: AtomicF32::new(0.6),
-            // attack_time: 882, //882 samples is 20ms
-            // attack_slope: 0.6,
-            // decay_time: 8820, //8820 samples is 200ms
-            // decay_slope: 0.5,
-            // sustain: 0.5,
-            // release_time: 882, //882 samples is 20ms
-            // release_slope: 0.6,
         }
     }
 }

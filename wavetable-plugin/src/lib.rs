@@ -2,21 +2,29 @@
     This project is more meant to suit my personal bass needs, since all synths I've tried fall short in one way or another.
     Goal for now is 4 wavetable oscillators that can FM each other however you want them to
     TODO:
-    Random-phase start
     Glide
-    Turn off processing for inactive oscillators (some magic with the for loop?)
+    Improve filter env
+    Gain comp on moog filter
+    Simplify cutoff
     Get FM going
+    Parameter smoothing
     Figure out the update to vst 0.2.0
     use f64 where it makes sense (pitch and possibly interp coefficients)
     Figure out file system
-    More wavetables
-    Parameter smoothing
+    More wavetables (this might require an installer to do well :/// )
+    Turn off processing for inactive oscillators (some magic with the for loop?)
     Remove filter envelope
-
+    Fix the elusive glitch where more than one tone makes it crap out temporarily
 
     Optimisation. look into doing simd on the oscillators sometime
     Licensing. Look into MIT and copyleft
     https://docs.rs/basic_dsp/0.2.0/basic_dsp/
+
+*/
+/*
+    GUI Research:
+    figure out how to do a basic gui with vstgui
+    figure out how to link it together with a basic rust vst through cxx
 
 */
 
@@ -135,10 +143,10 @@ impl PluginParameters for Parameters {
             9 => self.inner.filter_params[0].res.get() / 4.,
             10 => (self.inner.filter_params[0].poles.get()) as f32 / 3.,
             11 => self.inner.filter_params[0].drive.get() / 5.,
-            12 => self.inner.modenv_params.attack_time.get() as f32 / 88200.,
-            13 => self.inner.modenv_params.decay_time.get() as f32 / 88200.,
+            12 => self.inner.modenv_params.attack_time.get() as f32 / 176400.,
+            13 => self.inner.modenv_params.decay_time.get() as f32 / 176400.,
             14 => self.inner.modenv_params.sustain.get(),
-            15 => self.inner.modenv_params.release_time.get() as f32 / 88200.,
+            15 => self.inner.modenv_params.release_time.get() as f32 / 176400.,
             16 => self.inner.cutoff_amount.get(),
             17 => self.inner.g_uvoices.get() as f32 / 7.,
             18 => self.inner.pitch_offs_val.get(),
@@ -184,18 +192,18 @@ impl PluginParameters for Parameters {
                 .inner
                 .modenv_params
                 .attack_time
-                .set((value * 88200.) as usize),
+                .set((value * 176400.) as usize),
             13 => self
                 .inner
                 .modenv_params
                 .decay_time
-                .set((value * 88200.) as usize),
+                .set((value * 176400.) as usize),
             14 => self.inner.modenv_params.sustain.set(value),
             15 => self
                 .inner
                 .modenv_params
                 .release_time
-                .set((value * 88200.) as usize),
+                .set((value * 176400.) as usize),
             16 => self.inner.cutoff_amount.set(value),
             17 => self.inner.g_uvoices.set(((value * 6.).ceil()) as usize + 1),
             18 => self.inner.change_spread(value),
@@ -245,7 +253,7 @@ impl PluginParameters for Parameters {
             13 => "ms".to_string(),
             14 => "%".to_string(),
             15 => "ms".to_string(),
-            16 => "%".to_string(),
+            16 => "Hz".to_string(),
             17 => "voices".to_string(),
             18 => "".to_string(),
             _ => "".to_string(),
@@ -280,7 +288,7 @@ impl PluginParameters for Parameters {
                 "{:.1}",
                 self.inner.modenv_params.release_time.get() as f32 / 88.2
             ),
-            16 => format!("{:.3}", self.inner.cutoff_amount.get()),
+            16 => format!("{:.1}", self.inner.cutoff_amount.get() * 20000.),
             17 => format!("{}", self.inner.g_uvoices.get()),
             18 => format!("{:.3}", self.inner.pitch_offs_val.get()),
             _ => format!(""),
