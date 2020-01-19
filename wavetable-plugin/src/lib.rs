@@ -3,18 +3,12 @@
     Goal for now is 4 wavetable oscillators that can FM each other however you want them to
     TODO:
     Glide
-    Improve filter env
-    Gain comp on moog filter
-    Simplify cutoff
     Get FM going
-    Parameter smoothing
-    Figure out the update to vst 0.2.0
     use f64 where it makes sense (pitch and possibly interp coefficients)
-    Figure out file system
-    More wavetables (this might require an installer to do well :/// )
+    More wavetables (this might require an installer to do properly :/// )
     Turn off processing for inactive oscillators (some magic with the for loop?)
-    Remove filter envelope
-    Fix the elusive glitch where more than one tone makes it crap out temporarily
+
+    Fix the elusive glitch where more than one tone makes the entire daw crap out
 
     Optimisation. look into doing simd on the oscillators sometime
     Licensing. Look into MIT and copyleft
@@ -63,6 +57,7 @@ impl<'a> Default for Synth<'a> {
 
 use std::sync::Arc;
 impl<'a> Plugin for Synth<'a> {
+    // FIXME: needs to set filter sample rate too
     fn set_sample_rate(&mut self, rate: f32) {
         self.synth.sample_rate = rate;
     }
@@ -123,10 +118,10 @@ impl<'a> Plugin for Synth<'a> {
     Osc on/off switches
     filter on/off
     Unison blend
+    Gain-compensation on transistor filter
     Parameters that could be added with some effort when there's a gui:
     more waveshaping parameters in the style of sytrus
     spectral crossfading for wavetables with few waves
-
 */
 impl PluginParameters for Parameters {
     fn get_parameter(&self, index: i32) -> f32 {
@@ -139,7 +134,7 @@ impl PluginParameters for Parameters {
             5 => self.inner.vol[1].get(),
             6 => self.inner.detune[1].get() * 25. - 24.5,
             7 => self.inner.octave[1].get() as f32 / 4. + 0.5,
-            8 => self.inner.filter_params[0].get_cutoff(),
+            8 => self.inner.filter_params[0].get_cutoff() * 4.,
             9 => self.inner.filter_params[0].res.get() / 4.,
             10 => (self.inner.filter_params[0].poles.get()) as f32 / 3.,
             11 => self.inner.filter_params[0].drive.get() / 5.,
@@ -168,8 +163,7 @@ impl PluginParameters for Parameters {
             7 => self.inner.octave[1].set((((value - 0.5) * 3.).round()) as i8),
             8 => {
                 for i in 0..self.inner.filter_params.len() {
-                    self.inner.filter_params[i].set_cutoff(value)
-                }
+                    self.inner.filter_params[i].cutoff_smoother.set(value / 4.);                }
             }
             9 => {
                 for i in 0..self.inner.filter_params.len() {
@@ -271,7 +265,8 @@ impl PluginParameters for Parameters {
             5 => format!("{:.3} dB", 20. * self.inner.vol[1].get().log10()),
             6 => format!("{:.3}", self.inner.detune[1].get()),
             7 => format!("{}", self.inner.octave[1].get()),
-            8 => format!("{:.0}", self.inner.filter_params[0].cutoff.get()),
+            // FIXME: Get the correct sample rate from daw here
+            8 => format!("{:.0}", self.inner.filter_params[0].cutoff_smoother.target_get() * 88200.),
             9 => format!("{:.3}", self.inner.filter_params[0].res.get()),
             10 => format!("{}", self.inner.filter_params[0].poles.get() + 1),
             11 => format!("{:.3}", self.inner.filter_params[0].drive.get()),
@@ -288,7 +283,7 @@ impl PluginParameters for Parameters {
                 "{:.1}",
                 self.inner.modenv_params.release_time.get() as f32 / 88.2
             ),
-            16 => format!("{:.1}", self.inner.cutoff_amount.get() * 20000.),
+            16 => format!("{:.1}", self.inner.cutoff_amount.get() * 22050.),
             17 => format!("{}", self.inner.g_uvoices.get()),
             18 => format!("{:.3}", self.inner.pitch_offs_val.get()),
             _ => format!(""),

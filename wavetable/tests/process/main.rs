@@ -33,7 +33,7 @@ fn test_variable_value() {
     // println!("table len should be 2: {}", tables.len());
     // assert_eq!(tables.len(), 2);
     // println!("{:?}", tables[0]);
-    let mut plugin = Synth::default();
+    let plugin = Synth::default();
     plugin.voices.params.change_spread(0.37);
 
     // _plugin.voices.oscs[0].change_table(&tables[1]);

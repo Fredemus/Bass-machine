@@ -10,7 +10,6 @@ pub struct Synth<'a> {
     note_duration: f64,
     pub sample_rate: f32, // FIXME(will): should not be pub
     pub voices: voiceset::Voiceset<'a>, // FIXME(will): should not be pub
-                          // wt_len: Vec<usize>,
 }
 
 impl<'a> Synth<'a> {
@@ -41,6 +40,7 @@ impl<'a> Synth<'a> {
                 break;
             }
         }
+        // FIXME: Implement voice stealing
         // if no free voices, nothing happens for now. Voice stealing should be implemented.
         // voice stealing requires keeping track of which voice was played last.
         if i > 7 {

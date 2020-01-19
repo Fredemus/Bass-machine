@@ -5,7 +5,6 @@ use std::sync::Arc;
 #[allow(dead_code)]
 /*
     Rethink modboy's use so it directly changes parameters? Potentially avoids some conditionals
-    Modboy kinda sucks to use. Change how it modulates cutoff (one way instead of both?)
 
 */
 enum Method {
@@ -37,10 +36,10 @@ impl Default for LadderFilter {
 }
 pub struct LadderParameters {
     // the "cutoff" parameter. Determines how heavy filtering is
-    pub cutoff: AtomicF32,
+    pub cutoff: f32,
     pub g: AtomicF32,
     // needed to calculate cutoff.
-    sample_rate: AtomicF32,
+    _sample_rate: AtomicF32,
     // makes a peak at cutoff
     pub res: AtomicF32,
     // used to choose where we want our output to be
@@ -49,18 +48,22 @@ pub struct LadderParameters {
     pub pole_value: AtomicF32,
     // a drive parameter. Just used to increase the volume, which results in heavier distortion
     pub drive: AtomicF32,
+
+    pub cutoff_smoother: Smoothed,
 }
 
 impl Default for LadderParameters {
     fn default() -> LadderParameters {
         LadderParameters {
-            cutoff: AtomicF32::new(1000.),
+            cutoff: 0.01133786848,
             res: AtomicF32::new(2.),
             poles: AtomicUsize::new(3),
             pole_value: AtomicF32::new(1.),
             drive: AtomicF32::new(0.),
-            sample_rate: AtomicF32::new(44100. * 2.),
-            g: AtomicF32::new(0.07135868087),
+            _sample_rate: AtomicF32::new(44100. * 2.),
+            g: AtomicF32::new(0.035634),
+
+            cutoff_smoother: Smoothed{state: AtomicF32::new(0.01133786848), target: AtomicF32::new(0.01133786848), filter_factor: 0.02 },
         }
     }
 }
@@ -82,6 +85,7 @@ impl LadderFilter {
     // performs a complete filter process (mystran's method)
     pub fn tick_pivotal(&mut self, input: [f32; 2], modboy: Option<f32>, amount: f32) {
         // if self.params.drive.get() > 0. {
+        self.params.cutoff_smoother.tick();
         self.run_ladder_nonlinear(
             input[0] * (self.params.drive.get() + 0.7),
             modboy,
@@ -124,11 +128,11 @@ impl LadderFilter {
             //let cutoff = self.cutoff * ((1.8f32.powf(10. * modboy.unwrap() - 10.)));
             //(3.1415 * self.cutoff / (self.sample_rate)).tan();
             //consider doing min-max on cutoff instead to simplify what's happening
-            (PI * (self.params.cutoff.get() + (20000. * (modboy.unwrap()) * amount))
-                / (self.params.sample_rate.get()))
+            (PI * (self.params.cutoff_smoother.get() + (0.25 * (modboy.unwrap()) * amount))
+                )
             .tan()
-            .min(6.787)
-            .max(0.002324)
+            .min(1.)
+            .max(0.0007001884742)
         };
         let mut a = [1f32; 5];
         let base;
@@ -192,11 +196,11 @@ impl LadderFilter {
             //let cutoff = self.cutoff * ((1.8f32.powf(10. * modboy.unwrap() - 10.)));
             //(3.1415 * self.cutoff / (self.sample_rate)).tan();
             //consider doing min-max on cutoff instead to simplify what's happening
-            (PI * (self.params.cutoff.get() + (20000. * (modboy.unwrap() - 0.5) * amount))
-                / (self.params.sample_rate.get()))
+            (PI * (self.params.cutoff_smoother.get() + (0.25 * (modboy.unwrap()) * amount))
+               )
             .tan()
-            .min(6.787)
-            .max(0.002324)
+            .min(1.)
+            .max(0.0007001884742)
         };
         // denominators of solutions of individual stages. Simplifies the math a bit
         let g0 = 1. / (1. + g);
@@ -216,13 +220,35 @@ impl LadderFilter {
 impl LadderParameters {
     pub fn set_cutoff(&self, value: f32) {
         // cutoff formula gives us a natural feeling cutoff knob that spends more time in the low frequencies
-        self.cutoff.set(20000. * (1.8f32.powf(10. * value - 10.)));
+        self.cutoff_smoother.set(0.25 * (1.8f32.powf(10. * value - 10.)));
         // bilinear transformation for g gives us a very accurate cutoff
         self.g
-            .set((PI * self.cutoff.get() / (self.sample_rate.get())).tan());
+            .set((PI * self.cutoff_smoother.get()).tan());
     }
     // returns the value used to set cutoff. for get_parameter function
     pub fn get_cutoff(&self) -> f32 {
-        1. + 0.1701297528 * (0.00005 * self.cutoff.get()).ln()
+        1.235849917 + 0.1701297528 * (self.cutoff_smoother.target_get()).ln()
+    }
+}
+// TODO: Might be nice on other parameters
+/// 1st order IIR filter for parameter smoothing
+pub struct Smoothed {
+    state: AtomicF32,
+    target: AtomicF32,
+    filter_factor: f32,
+}
+
+impl Smoothed {
+    pub fn set(&self, value: f32) {
+        self.target.set(value);
+    }
+    pub fn target_get(&self) -> f32 {
+        self.target.get()
+    }
+    pub fn get(&self) -> f32 {
+        self.state.get()
+    }
+    fn tick(&self) {
+        self.state.set((self.target.get() - self.state.get()) * self.filter_factor + self.state.get());
     }
 }
